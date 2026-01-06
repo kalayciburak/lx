@@ -2,7 +2,7 @@
 
 Terminal-based log viewer. Paste logs, filter, annotate, copy.
 
-![lx demo](demo.gif)
+![lx demo](./demo.gif)
 
 ```bash
 # From clipboard
