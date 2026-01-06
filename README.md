@@ -234,7 +234,7 @@ Results are heuristic-based. False positives possible with unusual log formats.
 
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ## Author
 
