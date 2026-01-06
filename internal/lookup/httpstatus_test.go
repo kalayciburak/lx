@@ -120,7 +120,7 @@ func TestExtractHTTPCode(t *testing.T) {
 }
 
 func TestFormatResult(t *testing.T) {
-	info := StatusInfo{503, "Service Unavailable", "Server temporarily overloaded"}
+	info := StatusInfo{503, "Service Unavailable", "Server temporarily overloaded", "Maintenance mode → 503 + Retry-After"}
 	result := FormatResult(info)
 	expected := "503 Service Unavailable — Server temporarily overloaded"
 	if result != expected {

@@ -19,7 +19,14 @@ const (
 	MaxCopyLines       = 1000
 	MaxSelectLines     = 3000
 	MaxTextFilterLines = 15000
+	LoadingBatchSize   = 10000
 )
+
+type LoadingBatchMsg struct {
+	Entries []logx.Entry
+}
+
+type LoadingCompleteMsg struct{}
 
 func sanitizeForClipboard(s string) string {
 	return strings.ReplaceAll(s, "\x00", "")
@@ -140,6 +147,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+	case LoadingBatchMsg:
+		m.State.AppendEntries(msg.Entries)
+		m.State.StatusMsg = "Loading... " + Itoa(m.State.LoadingProgress) + " lines"
+		return m, nil
+	case LoadingCompleteMsg:
+		m.State.FinishLoading()
+		m.State.StatusMsg = "Loaded " + Itoa(len(m.State.Entries)) + " lines"
+		return m, nil
 	}
 	return m, nil
 }

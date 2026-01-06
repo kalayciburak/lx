@@ -142,6 +142,9 @@ type State struct {
 	PrevMode Mode
 
 	StatusMsg string
+
+	IsLoading       bool
+	LoadingProgress int
 }
 
 func NewState(entries []logx.Entry, inputMode input.Mode, fileName string) *State {
@@ -163,6 +166,38 @@ func NewState(entries []logx.Entry, inputMode input.Mode, fileName string) *Stat
 		ShowingNotes: make(map[int]bool),
 		Selected:     make(map[int]bool),
 	}
+}
+
+func NewLoadingState(inputMode input.Mode, fileName string) *State {
+	return &State{
+		Entries:      make([]logx.Entry, 0),
+		Filtered:     make([]int, 0),
+		InputMode:    inputMode,
+		FileName:     fileName,
+		Mode:         ModeList,
+		Notes:        make(map[int]Note),
+		NoteLineIdx:  -1,
+		ShowingNotes: make(map[int]bool),
+		Selected:     make(map[int]bool),
+		IsLoading:    true,
+	}
+}
+
+func (s *State) AppendEntries(newEntries []logx.Entry) {
+	startIdx := len(s.Entries)
+	s.Entries = append(s.Entries, newEntries...)
+
+	for i := range newEntries {
+		if !newEntries[i].Deleted {
+			s.Filtered = append(s.Filtered, startIdx+i)
+		}
+	}
+	s.LoadingProgress = len(s.Entries)
+}
+
+func (s *State) FinishLoading() {
+	s.IsLoading = false
+	s.Refilter()
 }
 
 func (s *State) Refilter() {

@@ -34,9 +34,14 @@ func RenderTitleBar(s *app.State, workspaceIdx, workspaceCount, width int) strin
 		parts = append(parts, StyleBarHighlight.Render(Truncate(s.FileName, 25)))
 	}
 
-	counts := StyleBarAccent.Render(Itoa(len(s.Filtered))) +
-		StyleBarDim.Render("/"+Itoa(len(s.Entries)))
-	parts = append(parts, counts)
+	if s.IsLoading {
+		loadingText := "Loading... " + Itoa(s.LoadingProgress) + " lines"
+		parts = append(parts, StyleBarAccent.Render("⟳ ")+StyleBarHighlight.Render(loadingText))
+	} else {
+		counts := StyleBarAccent.Render(Itoa(len(s.Filtered))) +
+			StyleBarDim.Render("/"+Itoa(len(s.Entries)))
+		parts = append(parts, counts)
+	}
 
 	if s.TotalNotes() > 0 {
 		parts = append(parts, StyleBarAccent.Render("≡")+StyleBarText.Render(" "+Itoa(s.TotalNotes())))
@@ -55,7 +60,7 @@ func RenderTitleBar(s *app.State, workspaceIdx, workspaceCount, width int) strin
 	if s.FilterQuery != "" {
 		right += StyleBarAccent.Render("⚡") + StyleBarText.Render(s.FilterQuery)
 	}
-	if s.StatusMsg != "" {
+	if s.StatusMsg != "" && !s.IsLoading {
 		if right != "" {
 			right += StyleBarDim.Render("  │  ")
 		}
