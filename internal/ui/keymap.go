@@ -5,6 +5,8 @@ import tea "github.com/charmbracelet/bubbletea"
 const (
 	KeyUp           = "up"
 	KeyDown         = "down"
+	KeyLeft         = "left"
+	KeyRight        = "right"
 	KeyJ            = "j"
 	KeyK            = "k"
 	KeyG            = "g"
@@ -27,6 +29,9 @@ const (
 	KeyCtrlC        = "ctrl+c"
 	KeyCtrlL        = "ctrl+l"
 	KeyBackspace    = "backspace"
+	KeyDelete       = "delete"
+	KeyHome         = "home"
+	KeyEnd          = "end"
 	KeyTab          = "tab"
 	KeyShiftTab     = "shift+tab"
 	KeyU_TR         = "ü"
@@ -37,6 +42,9 @@ const (
 	Key2            = "2"
 	Key3            = "3"
 	Key4            = "4"
+	KeyPgUp         = "pgup"
+	KeyPgDn         = "pgdown"
+	KeyCtrlR        = "ctrl+r"
 )
 
 func IsKey(msg tea.KeyMsg, keys ...string) bool {

@@ -67,8 +67,6 @@ func RenderList(s *app.State, height, width int) string {
 		return RenderEmpty(height, width)
 	}
 
-	var lines []string
-
 	maxNum := len(s.Entries)
 	lineNumW := len(Itoa(maxNum)) + 1
 	if lineNumW < 4 {
@@ -76,34 +74,88 @@ func RenderList(s *app.State, height, width int) string {
 	}
 
 	start := 0
-	if s.Cursor >= height {
-		start = s.Cursor - height + 1
-	}
-	end := start + height
-	if end > len(s.Filtered) {
-		end = len(s.Filtered)
+	
+	getItemHeight := func(idx int) int {
+		h := 1
+		if s.IsNoteShowing(idx) && s.HasNote(idx) {
+			if note, ok := s.GetNoteObj(idx); ok {
+				noteBox := RenderInlineNoteBox(note, width)
+				h += strings.Count(noteBox, "\n") + 1
+			}
+		}
+		return h
 	}
 
+	if s.Cursor >= len(s.Filtered) {
+		s.Cursor = len(s.Filtered) - 1
+	}
+	
+	matchedStart := 0
+	
+	if s.Cursor < height {
+		testLines := 0
+		fits := true
+		for i := 0; i <= s.Cursor; i++ {
+			testLines += getItemHeight(s.Filtered[i])
+			if testLines > height {
+				fits = false
+				break
+			}
+		}
+		if fits {
+			matchedStart = 0
+		} else {
+			needed := 0
+			for i := s.Cursor; i >= 0; i-- {
+				h := getItemHeight(s.Filtered[i])
+				if needed + h > height {
+					matchedStart = i + 1
+					break
+				}
+				needed += h
+				matchedStart = i
+			}
+		}
+	} else {
+		needed := 0
+		for i := s.Cursor; i >= 0; i-- {
+			h := getItemHeight(s.Filtered[i])
+			if needed + h > height {
+				matchedStart = i + 1
+				break
+			}
+			needed += h
+			matchedStart = i
+		}
+	}
+	
+	start = matchedStart
+	
+	var lines []string
+	end := len(s.Filtered)
+	
 	for i := start; i < end && len(lines) < height; i++ {
 		entryIdx := s.Filtered[i]
 		entry := s.Entries[entryIdx]
 		isSelected := i == s.Cursor
 		hasNote := s.HasNote(entryIdx)
+		
+		itemLines := []string{}
 
-		if s.IsNoteShowing(entryIdx) && hasNote && len(lines) < height-1 {
-			note := s.GetNote(entryIdx)
-			noteBox := RenderInlineNoteBox(note, width)
-			noteLines := strings.Split(noteBox, "\n")
-			for _, noteLine := range noteLines {
-				if len(lines) < height-1 {
-					lines = append(lines, noteLine)
-				}
+		if s.IsNoteShowing(entryIdx) && hasNote {
+			if note, ok := s.GetNoteObj(entryIdx); ok {
+				noteBox := RenderInlineNoteBox(note, width)
+				noteParts := strings.Split(noteBox, "\n")
+				itemLines = append(itemLines, noteParts...)
 			}
 		}
+		
+		itemLines = append(itemLines, RenderListLine(&entry, entryIdx+1, lineNumW, width, isSelected, hasNote))
 
-		if len(lines) < height {
-			line := RenderListLine(&entry, entryIdx+1, lineNumW, width, isSelected, hasNote)
-			lines = append(lines, line)
+		for _, l := range itemLines {
+			if len(lines) < height {
+				lines = append(lines, l)
+			}
 		}
 	}
 
@@ -192,12 +244,47 @@ func RenderLxFormat(msg string, isStack bool) string {
 		return StyleDetailHeader.Render(msg)
 	}
 	if strings.HasPrefix(msg, "• [line") {
-		if idx := strings.Index(msg, "] "); idx != -1 {
-			prefix := msg[:idx+1]
-			content := msg[idx+1:]
-			return StyleNoteIndicator.Render(prefix) + StyleMessage.Render(content)
+		endBracket := strings.Index(msg, "] ")
+		if endBracket == -1 {
+			return StyleNoteIndicator.Render(msg)
 		}
-		return StyleNoteIndicator.Render(msg)
+		
+		prefix := msg[:endBracket+2]
+		rest := msg[endBracket+2:]
+
+		if strings.HasPrefix(rest, "[") {
+			endBlock := strings.Index(rest, "] ")
+			if endBlock != -1 {
+				blockContent := rest[1:endBlock]
+				parts := strings.Fields(blockContent)
+				
+				var coloredBlock string
+				if len(parts) > 1 {
+					levelText := parts[0]
+					timeText := parts[1]
+					
+					var levelStyle lipgloss.Style
+					if levelText == "CRIT" {
+						levelStyle = StyleLevelError
+					} else if levelText == "UNSURE" {
+						levelStyle = StyleLevelWarn
+					} else {
+						levelStyle = StyleLevelInfo
+					}
+					
+					coloredBlock = "[" + levelStyle.Render(levelText) + " " + StyleTimestamp.Render(timeText) + "]"
+				} else if len(parts) == 1 {
+					timeText := parts[0]
+					coloredBlock = "[" + StyleTimestamp.Render(timeText) + "]"
+				} else {
+					coloredBlock = "[" + blockContent + "]"
+				}
+				
+				return StyleNoteIndicator.Render(prefix) + coloredBlock + StyleMessage.Render(rest[endBlock+1:])
+			}
+		}
+
+		return StyleNoteIndicator.Render(prefix) + StyleMessage.Render(rest)
 	}
 
 	if isStack {
@@ -206,73 +293,78 @@ func RenderLxFormat(msg string, isStack bool) string {
 	return StyleMessage.Render(msg)
 }
 
-func RenderInlineNoteBox(note string, width int) string {
-	noteVisualLen := lipgloss.Width(note)
-	boxW := noteVisualLen + 6
+func RenderInlineNoteBox(note app.Note, width int) string {
+	var headerText string
+	var headerStyle lipgloss.Style
+	switch note.Level {
+	case app.NoteLevelCritical:
+		headerText = "! CRIT"
+		headerStyle = StyleLevelError
+	case app.NoteLevelUnsure:
+		headerText = "? UNSURE"
+		headerStyle = StyleLevelWarn
+	default:
+		headerText = "NOT"
+		headerStyle = StyleNotesHeader
+	}
 
-	minW := 20
+	boxW := 40
 	maxW := width - 8
-	if maxW > 70 {
-		maxW = 70
-	}
-	if boxW < minW {
-		boxW = minW
-	}
-	if boxW > maxW {
+	if maxW < boxW {
 		boxW = maxW
 	}
+	if boxW < 20 {
+		boxW = 20
+	}
 
-	contentW := boxW - 4
+	innerW := boxW - 4
 
-	noteRunes := []rune(note)
+	noteRunes := []rune(note.Text)
 	var noteLines []string
-	if len(noteRunes) <= contentW {
-		noteLines = []string{note}
-	} else {
-		for len(noteRunes) > 0 {
-			if len(noteRunes) <= contentW {
-				noteLines = append(noteLines, string(noteRunes))
+	for len(noteRunes) > 0 {
+		if len(noteRunes) <= innerW {
+			noteLines = append(noteLines, string(noteRunes))
+			break
+		}
+		breakAt := innerW
+		for i := innerW; i > innerW/2; i-- {
+			if noteRunes[i] == ' ' {
+				breakAt = i
 				break
 			}
-			breakAt := contentW
-			for i := contentW; i > contentW/2; i-- {
-				if noteRunes[i] == ' ' {
-					breakAt = i
-					break
-				}
-			}
-			noteLines = append(noteLines, string(noteRunes[:breakAt]))
-			noteRunes = []rune(strings.TrimLeft(string(noteRunes[breakAt:]), " "))
 		}
+		noteLines = append(noteLines, string(noteRunes[:breakAt]))
+		noteRunes = []rune(strings.TrimLeft(string(noteRunes[breakAt:]), " "))
 	}
 
-	if len(noteLines) > 4 {
-		noteLines = noteLines[:4]
-		lastRunes := []rune(noteLines[3])
-		if len(lastRunes) > 3 {
-			noteLines[3] = string(lastRunes[:len(lastRunes)-3]) + "..."
+	if len(noteLines) > 3 {
+		noteLines = noteLines[:3]
+		runes := []rune(noteLines[2])
+		if len(runes) > 3 {
+			noteLines[2] = string(runes[:len(runes)-3]) + "..."
 		}
-	}
-
-	headerText := " NOT "
-	leftPad := 1
-	rightPad := boxW - 2 - len(headerText) - leftPad
-	if rightPad < 0 {
-		rightPad = 0
 	}
 
 	var result []string
-
-	topLine := "   " + StyleNoteBoxBorder.Render("╭"+strings.Repeat("─", leftPad)) +
-		StyleNotesHeader.Render(headerText) +
-		StyleNoteBoxBorder.Render(strings.Repeat("─", rightPad)+"╮")
+	
+	headerRendered := headerStyle.Render(" "+headerText+" ")
+	headerW := lipgloss.Width(headerRendered)
+	
+	rightDash := boxW - 3 - headerW
+	if rightDash < 0 {
+		rightDash = 0
+	}
+	topLine := "   " + StyleNoteBoxBorder.Render("╭─") +
+		headerRendered +
+		StyleNoteBoxBorder.Render(strings.Repeat("─", rightDash)+"╮")
 	result = append(result, topLine)
 
 	for _, line := range noteLines {
-		lineVisualW := lipgloss.Width(line)
-		pad := contentW - lineVisualW
+		lineRunes := []rune(line)
+		pad := innerW - len(lineRunes)
 		if pad < 0 {
 			pad = 0
+			line = string(lineRunes[:innerW])
 		}
 		contentLine := "   " + StyleNoteBoxBorder.Render("│") +
 			StyleNoteBox.Render(" "+line+strings.Repeat(" ", pad)+" ") +
@@ -308,7 +400,7 @@ func RenderEmpty(height, width int) string {
 	logoPad := (modalW - 2 - lipgloss.Width(logoText)) / 2
 	lines = append(lines, makeLine(strings.Repeat(" ", logoPad)+StyleDetailHeader.Render(logoText)))
 
-	subtitle := "Log X-Ray Viewer"
+	subtitle := "Log X-Ray"
 	subPad := (modalW - 2 - len(subtitle)) / 2
 	lines = append(lines, makeLine(strings.Repeat(" ", subPad)+StyleHelpDesc.Render(subtitle)))
 
@@ -395,7 +487,7 @@ func CountDetailLines(entry *logx.Entry, width int) int {
 	return lines
 }
 
-func RenderDetail(entry *logx.Entry, height, width int) string {
+func RenderDetail(entry *logx.Entry, height, width, offset int) string {
 	var lines []string
 
 	if entry == nil {
@@ -415,23 +507,34 @@ func RenderDetail(entry *logx.Entry, height, width int) string {
 	contentH := height - 1
 	var contentLines []string
 	if entry.IsJSON && entry.Fields != nil {
-		contentLines = renderJSONDetailLines(entry, width-2, contentH)
+		contentLines = renderJSONDetailLines(entry, width-2)
 	} else {
-		contentLines = renderTextDetailLines(entry, width-2, contentH)
+		contentLines = renderTextDetailLines(entry, width-2)
 	}
-	lines = append(lines, contentLines...)
+
+	totalLines := len(contentLines)
+	if offset > totalLines-contentH {
+		offset = totalLines - contentH
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	visibleLines := contentLines[offset:]
+	if len(visibleLines) > contentH {
+		visibleLines = visibleLines[:contentH]
+	}
+
+	lines = append(lines, visibleLines...)
 
 	for len(lines) < height {
 		lines = append(lines, "")
-	}
-	if len(lines) > height {
-		lines = lines[:height]
 	}
 
 	return strings.Join(lines, "\n")
 }
 
-func renderJSONDetailLines(entry *logx.Entry, width, maxLines int) []string {
+func renderJSONDetailLines(entry *logx.Entry, width int) []string {
 	var lines []string
 
 	keyFields := []string{"msg", "message", "level", "severity", "error", "timestamp", "time"}
@@ -440,38 +543,32 @@ func renderJSONDetailLines(entry *logx.Entry, width, maxLines int) []string {
 	for _, key := range keyFields {
 		if val, ok := entry.Fields[key]; ok {
 			line := " " + StyleDetailLabel.Render(key+":") + " " + StyleDetailValue.Render(formatValue(val))
-			lines = append(lines, Truncate(line, width))
-			shown[key] = true
-			if len(lines) >= maxLines-1 {
-				break
+			if lipgloss.Width(line) > width {
+				line = Truncate(line, width)
 			}
+			lines = append(lines, line)
+			shown[key] = true
 		}
 	}
 
-	if len(lines) < maxLines-1 {
-		remaining := make(map[string]any)
-		for k, v := range entry.Fields {
-			if !shown[k] {
-				remaining[k] = v
-			}
+	remaining := make(map[string]any)
+	for k, v := range entry.Fields {
+		if !shown[k] {
+			remaining[k] = v
 		}
+	}
 
-		if len(remaining) > 0 {
-			lines = append(lines, " "+StyleDetailDim.Render("───"))
+	if len(remaining) > 0 {
+		lines = append(lines, " "+StyleDetailDim.Render("───"))
 
-			pretty, _ := json.MarshalIndent(remaining, " ", "  ")
-			highlighted := HighlightJSON(string(pretty))
-			jsonLines := strings.Split(highlighted, "\n")
-
-			for _, line := range jsonLines {
-				if len(lines) >= maxLines-1 {
-					lines = append(lines, " "+StyleDetailDim.Render("..."))
-					break
-				}
-				if lipgloss.Width(line) > width {
-					line = line[:width-3] + "..."
-				}
-				lines = append(lines, line)
+		pretty, _ := json.MarshalIndent(remaining, " ", "  ")
+		highlighted := HighlightJSON(string(pretty))
+		
+		jsonLines := strings.Split(highlighted, "\n")
+		for _, line := range jsonLines {
+			wrapped := performWrapping(line, width, 2)
+			for _, wLine := range strings.Split(wrapped, "\n") {
+				lines = append(lines, wLine)
 			}
 		}
 	}
@@ -479,7 +576,7 @@ func renderJSONDetailLines(entry *logx.Entry, width, maxLines int) []string {
 	return lines
 }
 
-func renderTextDetailLines(entry *logx.Entry, width, maxLines int) []string {
+func renderTextDetailLines(entry *logx.Entry, width int) []string {
 	var lines []string
 
 	if entry.Timestamp != "" {
@@ -489,22 +586,25 @@ func renderTextDetailLines(entry *logx.Entry, width, maxLines int) []string {
 		lines = append(lines, " "+StyleDetailLabel.Render("Level:")+" "+LevelStyle(entry.Level).Render(" "+entry.Level.String()+" "))
 	}
 
-	if len(lines) < maxLines-1 {
-		lines = append(lines, " "+StyleDetailDim.Render("───"))
+	lines = append(lines, " "+StyleDetailDim.Render("───"))
 
-		wrapped := WordWrap(entry.Raw, width-2)
-		rawLines := strings.Split(wrapped, "\n")
+	style := lipgloss.NewStyle().Width(width - 2).Foreground(ColorTextPrimary)
+	rendered := style.Render(entry.Raw)
+	rawLines := strings.Split(rendered, "\n")
 
-		for _, line := range rawLines {
-			if len(lines) >= maxLines-1 {
-				lines = append(lines, " "+StyleDetailDim.Render("..."))
-				break
-			}
-			lines = append(lines, " "+StyleDetailValue.Render(line))
-		}
+	for _, line := range rawLines {
+		lines = append(lines, " "+line)
 	}
 
 	return lines
+}
+
+func performWrapping(text string, width int, indent int) string {
+	if width <= 0 {
+		return text
+	}
+	style := lipgloss.NewStyle().Width(width).PaddingLeft(indent)
+	return style.Render(text)
 }
 
 func formatValue(v any) string {
@@ -602,7 +702,7 @@ func HighlightJSON(s string) string {
 	return b.String()
 }
 
-func RenderNotesModal(note string, lineNum, height, width int) string {
+func RenderNotesModal(note string, cursorPos, lineNum, height, width int) string {
 	modalW := 50
 	if modalW > width-8 {
 		modalW = width - 8
@@ -611,7 +711,21 @@ func RenderNotesModal(note string, lineNum, height, width int) string {
 
 	var content strings.Builder
 
-	headerText := " NOTE FOR LINE " + Itoa(lineNum) + " "
+	level, _ := app.ParseNoteLevel(note)
+	var headerText string
+	var headerStyle lipgloss.Style
+	switch level {
+	case app.NoteLevelCritical:
+		headerText = " ! CRIT - LINE " + Itoa(lineNum) + " "
+		headerStyle = StyleLevelError
+	case app.NoteLevelUnsure:
+		headerText = " ? UNSURE - LINE " + Itoa(lineNum) + " "
+		headerStyle = StyleLevelWarn
+	default:
+		headerText = " NOTE FOR LINE " + Itoa(lineNum) + " "
+		headerStyle = StyleNotesHeader
+	}
+
 	leftPad := (modalW - 2 - len(headerText)) / 2
 	rightPad := modalW - 2 - len(headerText) - leftPad
 	if leftPad < 0 {
@@ -620,16 +734,60 @@ func RenderNotesModal(note string, lineNum, height, width int) string {
 	if rightPad < 0 {
 		rightPad = 0
 	}
-	content.WriteString(StyleFrameBorder.Render("╭" + strings.Repeat("─", leftPad)) + StyleNotesHeader.Render(headerText) + StyleFrameBorder.Render(strings.Repeat("─", rightPad) + "╮") + "\n")
+	content.WriteString(StyleFrameBorder.Render("╭" + strings.Repeat("─", leftPad)) + headerStyle.Render(headerText) + StyleFrameBorder.Render(strings.Repeat("─", rightPad) + "╮") + "\n")
 
 	content.WriteString(StyleFrameBorder.Render("│") + strings.Repeat(" ", modalW-2) + StyleFrameBorder.Render("│") + "\n")
 
 	maxW := modalW - 7
-	displayNote := note
-	if len(note) > maxW {
-		displayNote = "…" + note[len(note)-maxW+1:]
+	noteRunes := []rune(note)
+	if cursorPos > len(noteRunes) {
+		cursorPos = len(noteRunes)
 	}
-	inputLine := displayNote + StyleCursorIndicator.Render("█")
+	if cursorPos < 0 {
+		cursorPos = 0
+	}
+
+	var displayStart, displayEnd int
+	if len(noteRunes) <= maxW {
+		displayStart = 0
+		displayEnd = len(noteRunes)
+	} else {
+		if cursorPos <= maxW/2 {
+			displayStart = 0
+			displayEnd = maxW
+		} else if cursorPos >= len(noteRunes)-maxW/2 {
+			displayStart = len(noteRunes) - maxW
+			displayEnd = len(noteRunes)
+		} else {
+			displayStart = cursorPos - maxW/2
+			displayEnd = displayStart + maxW
+		}
+	}
+
+	displayRunes := noteRunes[displayStart:displayEnd]
+	displayCursorPos := cursorPos - displayStart
+
+	prefix := ""
+	if displayStart > 0 {
+		prefix = "…"
+		if len(displayRunes) > 0 {
+			displayRunes = displayRunes[1:]
+		}
+		displayCursorPos--
+		if displayCursorPos < 0 {
+			displayCursorPos = 0
+		}
+	}
+
+	var inputLine string
+	if displayCursorPos >= len(displayRunes) {
+		inputLine = prefix + string(displayRunes) + StyleCursorIndicator.Render("█")
+	} else {
+		beforeCursor := string(displayRunes[:displayCursorPos])
+		afterCursor := string(displayRunes[displayCursorPos:])
+		inputLine = prefix + beforeCursor + StyleCursorIndicator.Render("█") + afterCursor
+	}
+
 	inputPad := modalW - 4 - lipgloss.Width(inputLine)
 	if inputPad < 0 {
 		inputPad = 0
@@ -641,7 +799,8 @@ func RenderNotesModal(note string, lineNum, height, width int) string {
 	content.WriteString(StyleFrameBorder.Render("├" + strings.Repeat("─", modalW-2) + "┤") + "\n")
 
 	hints := StyleHelpKey.Render("Enter") + StyleFooter.Render(" save  ") +
-		StyleHelpKey.Render("ESC") + StyleFooter.Render(" cancel")
+		StyleHelpKey.Render("ESC") + StyleFooter.Render(" cancel  ") +
+		StyleHelpKey.Render("←→") + StyleFooter.Render(" move")
 	hintsW := lipgloss.Width(hints)
 	hintsPad := (modalW - 2 - hintsW) / 2
 	if hintsPad < 0 {
@@ -828,7 +987,7 @@ func RenderFilterModal(query string, levelFilter int, height, width int) string 
 
 	content.WriteString(StyleFrameBorder.Render("│") + pad(modalW-2) + StyleFrameBorder.Render("│") + "\n")
 
-	levelFilters := []string{"ALL", "ERROR", "WARN", "INFO", "DEBUG"}
+	levelFilters := []string{"ALL", "ERROR", "WARN", "INFO", "DEBUG", "TRACE"}
 	var levelParts []string
 	for i, lf := range levelFilters {
 		if i == levelFilter {
@@ -925,60 +1084,97 @@ func RenderFilterModal(query string, levelFilter int, height, width int) string 
 }
 
 func RenderHelp(height, width int) string {
-	rows := [][]string{
-		{"j/k", "navigate", "1", "frequency"},
-		{"g/G", "top/bottom", "2", "lifetime"},
-		{"/", "filter", "3", "burst"},
-		{"Tab", "level filter", "4", "diversity"},
-		{"ESC", "clear", "", ""},
-		{"", "", "", ""},
-		{"N", "write note", "c", "copy line"},
-		{"n", "toggle note", "y", "copy all"},
-		{"m", "show all", "^L", "HTTP lookup"},
-		{"]/[", "jump notes", "?", "help"},
-		{"", "", "", ""},
-		{"Enter", " detail", "q", "quit"},
-	}
-
-	modalW := 46
+	modalW := 60
 	innerW := modalW - 4
 
 	var content strings.Builder
 
-	headerText := " HELP "
+	headerText := " KEYBOARD SHORTCUTS "
 	headerPadTotal := modalW - 2 - len(headerText)
 	leftPad := headerPadTotal / 2
 	rightPad := headerPadTotal - leftPad
 	content.WriteString(StyleFrameBorder.Render("╭"+strings.Repeat("─", leftPad)) + StyleDetailHeader.Render(headerText) + StyleFrameBorder.Render(strings.Repeat("─", rightPad)+"╮") + "\n")
 
-	content.WriteString(StyleFrameBorder.Render("│") + strings.Repeat(" ", modalW-2) + StyleFrameBorder.Render("│") + "\n")
-
-	for _, row := range rows {
-		if row[0] == "" && row[2] == "" {
-			content.WriteString(StyleFrameBorder.Render("│") + strings.Repeat(" ", modalW-2) + StyleFrameBorder.Render("│") + "\n")
-			continue
+	emptyLine := func() {
+		content.WriteString(StyleFrameBorder.Render("│") + strings.Repeat(" ", modalW-2) + StyleFrameBorder.Render("│") + "\n")
+	}
+	sectionHeader := func(title string) {
+		styled := StyleBarAccent.Render("── " + title + " ")
+		styledW := lipgloss.Width(styled)
+		pad := innerW - styledW
+		if pad < 0 {
+			pad = 0
 		}
-
-		col1Key := StyleHelpKey.Render(PadRight(row[0], 5))
-		col1Desc := StyleHelpDesc.Render(PadRight(row[1], 12))
-		col2Key := StyleHelpKey.Render(PadRight(row[2], 4))
-		col2Desc := StyleHelpDesc.Render(row[3])
-
-		line := "  " + col1Key + col1Desc + "  " + col2Key + col2Desc
+		content.WriteString(StyleFrameBorder.Render("│") + " " + styled + StyleBarDim.Render(strings.Repeat("─", pad)) + " " + StyleFrameBorder.Render("│") + "\n")
+	}
+	row := func(key1, desc1, key2, desc2 string) {
+		padKeyRight := func(s string, w int) string {
+			visW := lipgloss.Width(s)
+			if visW >= w {
+				return s
+			}
+			return s + strings.Repeat(" ", w-visW)
+		}
+		col1 := StyleHelpKey.Render(padKeyRight(key1, 8)) + StyleHelpDesc.Render(PadRight(desc1, 18))
+		col2 := ""
+		if key2 != "" {
+			col2 = StyleHelpKey.Render(padKeyRight(key2, 8)) + StyleHelpDesc.Render(desc2)
+		}
+		line := " " + col1 + col2
 		lineW := lipgloss.Width(line)
 		pad := innerW - lineW
 		if pad < 0 {
 			pad = 0
 		}
-
 		content.WriteString(StyleFrameBorder.Render("│") + " " + line + strings.Repeat(" ", pad) + " " + StyleFrameBorder.Render("│") + "\n")
 	}
 
-	content.WriteString(StyleFrameBorder.Render("│") + strings.Repeat(" ", modalW-2) + StyleFrameBorder.Render("│") + "\n")
+	emptyLine()
 
-	footer := StyleHelpDesc.Render("lx by kalayciburak")
+	sectionHeader("NAVIGATION")
+	row("j / ↓", "move down", "k / ↑", "move up")
+	row("g", "go to top", "G", "go to bottom")
+	row("Enter", "toggle detail", "ESC", "back / close")
+
+	emptyLine()
+
+	sectionHeader("FILTER")
+	row("/", "open filter", "Tab", "cycle level")
+	row("^R", "clear filter", "", "")
+
+	emptyLine()
+
+	sectionHeader("NOTES")
+	row("N", "write/edit note", "n", "toggle note")
+	row("m", "show/hide all", "] / [", "next/prev note")
+	row("!", "critical note", "?", "unsure note")
+
+	emptyLine()
+
+	sectionHeader("SIGNAL ANALYSIS")
+	row("1", "error frequency", "2", "first/last seen")
+	row("3", "burst detector", "4", "error diversity")
+
+	emptyLine()
+
+	sectionHeader("ACTIONS")
+	row("c", "copy current", "y", "copy all")
+	row("d", "delete line", "x", "clear all")
+	row("p / ^V", "paste logs", "^L", "HTTP lookup")
+
+	emptyLine()
+
+	sectionHeader("OTHER")
+	row("?", "this help", "q", "quit")
+
+	emptyLine()
+
+	footer := StyleHelpDesc.Render("lx - Log X-Ray by kalayciburak")
 	footerW := lipgloss.Width(footer)
 	footerPad := (innerW - footerW) / 2
+	if footerPad < 0 {
+		footerPad = 0
+	}
 	content.WriteString(StyleFrameBorder.Render("│") + " " + strings.Repeat(" ", footerPad) + footer + strings.Repeat(" ", innerW-footerPad-footerW) + " " + StyleFrameBorder.Render("│") + "\n")
 
 	content.WriteString(StyleFrameBorder.Render("╰" + strings.Repeat("─", modalW-2) + "╯"))
@@ -1015,36 +1211,39 @@ func RenderFooter(mode int, statusMsg string, width int) string {
 	switch app.Mode(mode) {
 	case app.ModeFilter:
 		hintParts = append(hintParts,
-			StyleBarAccent.Render("ESC")+StyleBarText.Render(" cancel"),
-			StyleBarAccent.Render("Enter")+StyleBarText.Render(" apply"))
+			StyleBarAccent.Render("Tab")+StyleBarText.Render(" level"),
+			StyleBarAccent.Render("Enter")+StyleBarText.Render(" apply"),
+			StyleBarAccent.Render("ESC")+StyleBarText.Render(" cancel"))
 	case app.ModeDetail:
 		hintParts = append(hintParts,
-			StyleBarAccent.Render("ESC")+StyleBarText.Render(" back"),
-			StyleBarAccent.Render("c")+StyleBarText.Render(" copy"),
+			StyleBarAccent.Render("^R")+StyleBarText.Render(" reset"),
+			StyleBarAccent.Render("^L")+StyleBarText.Render(" lookup"),
+			StyleBarAccent.Render("1-4")+StyleBarText.Render(" signal"),
 			StyleBarAccent.Render("N")+StyleBarText.Render(" note"),
-			StyleBarAccent.Render("n")+StyleBarText.Render(" read"),
-			StyleBarAccent.Render("m")+StyleBarText.Render(" all"))
+			StyleBarAccent.Render("c")+StyleBarText.Render(" copy"),
+			StyleBarAccent.Render("ESC")+StyleBarText.Render(" back"))
 	case app.ModeNotes:
 		hintParts = append(hintParts,
+			StyleBarAccent.Render("!")+StyleBarText.Render(" crit"),
+			StyleBarAccent.Render("?")+StyleBarText.Render(" unsure"),
 			StyleBarAccent.Render("Enter")+StyleBarText.Render(" save"),
 			StyleBarAccent.Render("ESC")+StyleBarText.Render(" cancel"))
 	case app.ModeLookup:
 		hintParts = append(hintParts,
-			StyleBarAccent.Render("ESC")+StyleBarText.Render(" close"),
-			StyleBarAccent.Render("j/k")+StyleBarText.Render(" select"),
-			StyleBarAccent.Render("Enter")+StyleBarText.Render(" copy"))
+			StyleBarAccent.Render("↑↓")+StyleBarText.Render(" select"),
+			StyleBarAccent.Render("Enter")+StyleBarText.Render(" copy"),
+			StyleBarAccent.Render("ESC")+StyleBarText.Render(" close"))
 	case app.ModeSignal:
 		hintParts = append(hintParts,
 			StyleBarAccent.Render("c")+StyleBarText.Render(" copy"),
 			StyleBarAccent.Render("ESC")+StyleBarText.Render(" close"))
 	default:
 		hintParts = append(hintParts,
-			StyleBarAccent.Render("j/k")+StyleBarText.Render(" nav"),
 			StyleBarAccent.Render("/")+StyleBarText.Render(" filter"),
-			StyleBarAccent.Render("y")+StyleBarText.Render(" yank"),
-			StyleBarAccent.Render("c")+StyleBarText.Render(" copy"),
+			StyleBarAccent.Render("^R")+StyleBarText.Render(" reset"),
+			StyleBarAccent.Render("^L")+StyleBarText.Render(" lookup"),
+			StyleBarAccent.Render("1-4")+StyleBarText.Render(" signal"),
 			StyleBarAccent.Render("N")+StyleBarText.Render(" note"),
-			StyleBarAccent.Render("m")+StyleBarText.Render(" all"),
 			StyleBarAccent.Render("?")+StyleBarText.Render(" help"))
 	}
 
@@ -1124,8 +1323,15 @@ func RenderSignalModal(result *signal.SignalResult, height, width int) string {
 
 	content.WriteString(StyleFrameBorder.Render("├" + strings.Repeat("─", modalW-2) + "┤") + "\n")
 
-	hints := StyleHelpKey.Render("c") + StyleFooter.Render(" copy  ") +
-		StyleHelpKey.Render("ESC") + StyleFooter.Render(" close")
+	var hints string
+	if result.Type == signal.SignalLifetime || result.Type == signal.SignalBurst {
+		hints = StyleHelpKey.Render("j/k") + StyleFooter.Render(" nav  ") +
+			StyleHelpKey.Render("c") + StyleFooter.Render(" copy  ") +
+			StyleHelpKey.Render("ESC") + StyleFooter.Render(" close")
+	} else {
+		hints = StyleHelpKey.Render("c") + StyleFooter.Render(" copy  ") +
+			StyleHelpKey.Render("ESC") + StyleFooter.Render(" close")
+	}
 	hintsW := lipgloss.Width(hints)
 	hintsPad := (modalW - 2 - hintsW) / 2
 	if hintsPad < 0 {

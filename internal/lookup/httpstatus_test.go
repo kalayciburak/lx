@@ -40,9 +40,9 @@ func TestSearchPrefix(t *testing.T) {
 		query    string
 		minCount int
 	}{
-		{"5", 5},   // 500, 501, 502, 503, 504
-		{"50", 5},  // 500-504
-		{"4", 10},  // 4xx codes
+		{"5", 5},
+		{"50", 5},
+		{"4", 10},
 	}
 
 	for _, tt := range tests {
@@ -69,7 +69,6 @@ func TestSearchText(t *testing.T) {
 			t.Errorf("Search(%q) got %d results, want >= %d", tt.query, len(results), len(tt.expectCodes))
 		}
 
-		// Check expected codes are present
 		for _, code := range tt.expectCodes {
 			found := false
 			for _, r := range results {

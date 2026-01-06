@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kalayciburak/lx/internal/app"
@@ -8,6 +10,10 @@ import (
 	"github.com/kalayciburak/lx/internal/lookup"
 	"github.com/kalayciburak/lx/internal/signal"
 )
+
+func sanitizeForClipboard(s string) string {
+	return strings.ReplaceAll(s, "\x00", "")
+}
 
 type Model struct {
 	State  *app.State
@@ -96,13 +102,24 @@ func (m Model) handleListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case IsKey(msg, KeySlash):
 		m.State.Mode = app.ModeFilter
+	case IsKey(msg, KeyCtrlR):
+		m.State.FilterQuery = ""
+		m.State.LevelFilter = app.LevelFilterAll
+		m.State.Refilter()
+		m.State.StatusMsg = "Filter cleared"
 	case IsKey(msg, KeyQuestion):
 		m.State.Mode = app.ModeHelp
 	case IsKey(msg, KeyShiftN):
 		idx := m.State.SelectedIndex()
 		if idx >= 0 {
 			m.State.NoteLineIdx = idx
-			m.State.CurrentNote = m.State.GetNote(idx)
+			if noteObj, ok := m.State.GetNoteObj(idx); ok {
+				prefix := noteObj.Level.Symbol()
+				m.State.CurrentNote = prefix + noteObj.Text
+			} else {
+				m.State.CurrentNote = ""
+			}
+			m.State.NoteCursorPos = len([]rune(m.State.CurrentNote))
 			m.State.PrevMode = m.State.Mode
 			m.State.Mode = app.ModeNotes
 		}
@@ -164,10 +181,10 @@ func (m Model) handleListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.State.Mode = app.ModeSignal
 	case IsKey(msg, KeyY):
 		content := app.ExportLogsWithNotes(m.State.VisibleEntries(), m.State.Notes, m.State.Filtered)
-		if err := clipboard.WriteAll(content); err != nil {
+		if err := clipboard.WriteAll(sanitizeForClipboard(content)); err != nil {
 			m.State.StatusMsg = "Clipboard error"
 		} else {
-			notesCount := m.State.TotalNotes()
+			notesCount := m.State.FilteredNotesCount()
 			if notesCount > 0 {
 				m.State.StatusMsg = "Copied " + Itoa(len(m.State.Filtered)) + " lines + " + Itoa(notesCount) + " notes"
 			} else {
@@ -179,16 +196,19 @@ func (m Model) handleListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if entry := m.State.SelectedEntry(); entry != nil {
 			lineNum := idx + 1
 			var content string
-			note := m.State.GetNote(idx)
-			if note != "" {
-				content = "=== NOTE (lx) ===\n• [line " + Itoa(lineNum) + "] " + note + "\n\n=== LOG ===\nline " + Itoa(lineNum) + ": " + app.ExportEntry(entry)
+			if noteObj, ok := m.State.GetNoteObj(idx); ok {
+				levelStr := ""
+				if noteObj.Level != app.NoteLevelNormal {
+					levelStr = noteObj.Level.String() + " "
+				}
+				content = "=== NOTE (lx) ===\n• [line " + Itoa(lineNum) + "] [" + levelStr + noteObj.CreatedAt.Format("15:04:05") + "] " + noteObj.Text + "\n\n=== LOG ===\nline " + Itoa(lineNum) + ": " + app.ExportEntry(entry)
 			} else {
 				content = "line " + Itoa(lineNum) + ": " + app.ExportEntry(entry)
 			}
-			if err := clipboard.WriteAll(content); err != nil {
+			if err := clipboard.WriteAll(sanitizeForClipboard(content)); err != nil {
 				m.State.StatusMsg = "Clipboard error"
 			} else {
-				if note != "" {
+				if m.State.HasNote(idx) {
 					m.State.StatusMsg = "Copied line " + Itoa(lineNum) + " + note"
 				} else {
 					m.State.StatusMsg = "Copied line " + Itoa(lineNum)
@@ -247,13 +267,28 @@ func (m Model) handleDetailMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.State.Mode = app.ModeList
 	case IsKey(msg, KeyJ, KeyDown):
 		m.State.MoveCursor(1)
+		m.State.DetailScroll = 0
 	case IsKey(msg, KeyK, KeyUp):
 		m.State.MoveCursor(-1)
+		m.State.DetailScroll = 0
+	case IsKey(msg, KeyPgDn):
+		m.State.DetailScroll += 5
+	case IsKey(msg, KeyPgUp):
+		m.State.DetailScroll -= 5
+		if m.State.DetailScroll < 0 {
+			m.State.DetailScroll = 0
+		}
 	case IsKey(msg, KeyShiftN):
 		idx := m.State.SelectedIndex()
 		if idx >= 0 {
 			m.State.NoteLineIdx = idx
-			m.State.CurrentNote = m.State.GetNote(idx)
+			if noteObj, ok := m.State.GetNoteObj(idx); ok {
+				prefix := noteObj.Level.Symbol()
+				m.State.CurrentNote = prefix + noteObj.Text
+			} else {
+				m.State.CurrentNote = ""
+			}
+			m.State.NoteCursorPos = len([]rune(m.State.CurrentNote))
 			m.State.PrevMode = app.ModeDetail
 			m.State.Mode = app.ModeNotes
 		}
@@ -281,16 +316,19 @@ func (m Model) handleDetailMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if entry := m.State.SelectedEntry(); entry != nil {
 			lineNum := idx + 1
 			var content string
-			note := m.State.GetNote(idx)
-			if note != "" {
-				content = "=== NOTE (lx) ===\n• [line " + Itoa(lineNum) + "] " + note + "\n\n=== LOG ===\nline " + Itoa(lineNum) + ": " + app.ExportEntry(entry)
+			if noteObj, ok := m.State.GetNoteObj(idx); ok {
+				levelStr := ""
+				if noteObj.Level != app.NoteLevelNormal {
+					levelStr = noteObj.Level.String() + " "
+				}
+				content = "=== NOTE (lx) ===\n• [line " + Itoa(lineNum) + "] [" + levelStr + noteObj.CreatedAt.Format("15:04:05") + "] " + noteObj.Text + "\n\n=== LOG ===\nline " + Itoa(lineNum) + ": " + app.ExportEntry(entry)
 			} else {
 				content = "line " + Itoa(lineNum) + ": " + app.ExportEntry(entry)
 			}
-			if err := clipboard.WriteAll(content); err != nil {
+			if err := clipboard.WriteAll(sanitizeForClipboard(content)); err != nil {
 				m.State.StatusMsg = "Clipboard error"
 			} else {
-				if note != "" {
+				if m.State.HasNote(idx) {
 					m.State.StatusMsg = "Copied line " + Itoa(lineNum) + " + note"
 				} else {
 					m.State.StatusMsg = "Copied line " + Itoa(lineNum)
@@ -316,10 +354,10 @@ func (m Model) handleDetailMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case IsKey(msg, KeyY):
 		content := app.ExportLogsWithNotes(m.State.VisibleEntries(), m.State.Notes, m.State.Filtered)
-		if err := clipboard.WriteAll(content); err != nil {
+		if err := clipboard.WriteAll(sanitizeForClipboard(content)); err != nil {
 			m.State.StatusMsg = "Clipboard error"
 		} else {
-			notesCount := m.State.TotalNotes()
+			notesCount := m.State.FilteredNotesCount()
 			if notesCount > 0 {
 				m.State.StatusMsg = "Copied " + Itoa(len(m.State.Filtered)) + " lines + " + Itoa(notesCount) + " notes"
 			} else {
@@ -331,6 +369,11 @@ func (m Model) handleDetailMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.State.StatusMsg = "Deleted"
 	case IsKey(msg, KeySlash):
 		m.State.Mode = app.ModeFilter
+	case IsKey(msg, KeyCtrlR):
+		m.State.FilterQuery = ""
+		m.State.LevelFilter = app.LevelFilterAll
+		m.State.Refilter()
+		m.State.StatusMsg = "Filter cleared"
 	case IsKey(msg, KeyCtrlL):
 		m.State.Mode = app.ModeLookup
 		if entry := m.State.SelectedEntry(); entry != nil {
@@ -376,6 +419,16 @@ func (m Model) handleHelpMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleNotesMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	runes := []rune(m.State.CurrentNote)
+	cursorPos := m.State.NoteCursorPos
+
+	if cursorPos > len(runes) {
+		cursorPos = len(runes)
+	}
+	if cursorPos < 0 {
+		cursorPos = 0
+	}
+
 	switch {
 	case IsKey(msg, KeyEsc):
 		m.State.SetNote(m.State.NoteLineIdx, m.State.CurrentNote)
@@ -399,21 +452,45 @@ func (m Model) handleNotesMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case IsKey(msg, KeyCtrlC):
 		if m.State.CurrentNote != "" {
-			if err := clipboard.WriteAll(m.State.CurrentNote); err != nil {
+			if err := clipboard.WriteAll(sanitizeForClipboard(m.State.CurrentNote)); err != nil {
 				m.State.StatusMsg = "Clipboard error"
 			} else {
 				m.State.StatusMsg = "Copied note"
 			}
 		}
+	case IsKey(msg, KeyLeft):
+		if cursorPos > 0 {
+			m.State.NoteCursorPos = cursorPos - 1
+		}
+	case IsKey(msg, KeyRight):
+		if cursorPos < len(runes) {
+			m.State.NoteCursorPos = cursorPos + 1
+		}
+	case IsKey(msg, KeyHome):
+		m.State.NoteCursorPos = 0
+	case IsKey(msg, KeyEnd):
+		m.State.NoteCursorPos = len(runes)
 	case IsKey(msg, KeyBackspace):
-		if len(m.State.CurrentNote) > 0 {
-			m.State.CurrentNote = m.State.CurrentNote[:len(m.State.CurrentNote)-1]
+		if cursorPos > 0 {
+			newRunes := append(runes[:cursorPos-1], runes[cursorPos:]...)
+			m.State.CurrentNote = string(newRunes)
+			m.State.NoteCursorPos = cursorPos - 1
+		}
+	case IsKey(msg, KeyDelete):
+		if cursorPos < len(runes) {
+			newRunes := append(runes[:cursorPos], runes[cursorPos+1:]...)
+			m.State.CurrentNote = string(newRunes)
 		}
 	default:
 		char := msg.String()
-		runes := []rune(char)
-		if len(runes) == 1 && len(m.State.CurrentNote) < 255 {
-			m.State.CurrentNote += char
+		charRunes := []rune(char)
+		if len(charRunes) == 1 && len(runes) < 255 {
+			newRunes := make([]rune, 0, len(runes)+1)
+			newRunes = append(newRunes, runes[:cursorPos]...)
+			newRunes = append(newRunes, charRunes[0])
+			newRunes = append(newRunes, runes[cursorPos:]...)
+			m.State.CurrentNote = string(newRunes)
+			m.State.NoteCursorPos = cursorPos + 1
 		}
 	}
 	return m, nil
@@ -436,7 +513,7 @@ func (m Model) handleLookupMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case IsKey(msg, KeyEnter):
 		if result := m.State.SelectedLookupResult(); result != nil {
 			content := Itoa(result.Code) + " " + result.Name + "\n" + result.Description + "\nExample: " + result.Example
-			if err := clipboard.WriteAll(content); err != nil {
+			if err := clipboard.WriteAll(sanitizeForClipboard(content)); err != nil {
 				m.State.StatusMsg = "Clipboard error"
 			} else {
 				m.State.StatusMsg = "Copied: " + result.Name
@@ -463,19 +540,53 @@ func (m Model) handleSignalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case IsKey(msg, KeyEsc, KeyQ):
 		m.State.Mode = app.ModeList
 		m.State.SignalResult = nil
+	case IsKey(msg, KeyJ, KeyDown):
+		if m.State.SignalResult != nil {
+			switch m.State.SignalResult.Type {
+			case signal.SignalLifetime, signal.SignalBurst:
+				m.State.MoveCursor(1)
+				m.updateSignalForCurrentEntry()
+			}
+		}
+	case IsKey(msg, KeyK, KeyUp):
+		if m.State.SignalResult != nil {
+			switch m.State.SignalResult.Type {
+			case signal.SignalLifetime, signal.SignalBurst:
+				m.State.MoveCursor(-1)
+				m.updateSignalForCurrentEntry()
+			}
+		}
 	case IsKey(msg, KeyC):
 		if m.State.SignalResult != nil {
 			content := m.State.SignalResult.FormatForClipboard()
-			if err := clipboard.WriteAll(content); err != nil {
+			if err := clipboard.WriteAll(sanitizeForClipboard(content)); err != nil {
 				m.State.StatusMsg = "Clipboard error"
 			} else {
 				m.State.StatusMsg = "Copied signal data"
 			}
+			m.State.Mode = app.ModeList
+			m.State.SignalResult = nil
 		}
 	case IsKey(msg, KeyCtrlC):
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+func (m *Model) updateSignalForCurrentEntry() {
+	if m.State.SignalResult == nil {
+		return
+	}
+	entry := m.State.SelectedEntry()
+	if entry == nil {
+		return
+	}
+	switch m.State.SignalResult.Type {
+	case signal.SignalLifetime:
+		m.State.SignalResult = signal.Lifetime(m.State.VisibleEntries(), entry.Message)
+	case signal.SignalBurst:
+		m.State.SignalResult = signal.DetectBurst(m.State.VisibleEntries(), entry.Message)
+	}
 }
 
 func (m Model) View() string {
@@ -549,7 +660,7 @@ func (m Model) renderWithDetail(w, h int) string {
 	}
 	list := RenderList(m.State, listH, w)
 	divider := Divider(w)
-	detail := RenderDetail(entry, detailH, w)
+	detail := RenderDetail(entry, detailH, w, m.State.DetailScroll)
 	return titleBar + "\n" + list + "\n" + divider + "\n" + detail + "\n" + footer
 }
 
@@ -570,7 +681,7 @@ func (m Model) renderWithNotes(w, h int) string {
 	}
 	bgLines := splitLines(bg)
 	lineNum := m.State.NoteLineIdx + 1
-	modal := RenderNotesModal(m.State.CurrentNote, lineNum, h-2, w)
+	modal := RenderNotesModal(m.State.CurrentNote, m.State.NoteCursorPos, lineNum, h-2, w)
 	modalLines := splitLines(modal)
 	return overlayModal(bgLines, modalLines, w, h-2)
 }

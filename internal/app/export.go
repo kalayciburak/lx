@@ -16,25 +16,42 @@ func ExportLogs(entries []logx.Entry) string {
 	return strings.Join(lines, "\n")
 }
 
-func ExportLogsWithNotes(entries []logx.Entry, notes map[int]string, indices []int) string {
+func ExportLogsWithNotes(entries []logx.Entry, notes map[int]Note, indices []int) string {
 	var b strings.Builder
 
-	if len(notes) > 0 {
+	filteredNotes := make(map[int]Note)
+	indicesSet := make(map[int]bool)
+	for _, idx := range indices {
+		indicesSet[idx] = true
+	}
+	for lineNum, note := range notes {
+		if indicesSet[lineNum] {
+			filteredNotes[lineNum] = note
+		}
+	}
+
+	if len(filteredNotes) > 0 {
 		b.WriteString("=== NOTES (lx) ===\n")
 
 		var lineNums []int
-		for lineNum := range notes {
+		for lineNum := range filteredNotes {
 			lineNums = append(lineNums, lineNum)
 		}
 		sort.Ints(lineNums)
 
 		for _, lineNum := range lineNums {
-			note := notes[lineNum]
-			if strings.TrimSpace(note) != "" {
+			note := filteredNotes[lineNum]
+			if strings.TrimSpace(note.Text) != "" {
 				b.WriteString("• [line ")
 				b.WriteString(itoa(lineNum + 1))
+				b.WriteString("] [")
+				if note.Level != NoteLevelNormal {
+					b.WriteString(note.Level.String())
+					b.WriteString(" ")
+				}
+				b.WriteString(note.CreatedAt.Format("15:04:05"))
 				b.WriteString("] ")
-				b.WriteString(note)
+				b.WriteString(note.Text)
 				b.WriteString("\n")
 			}
 		}

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/kalayciburak/lx/internal/input"
 	"github.com/kalayciburak/lx/internal/logx"
 	"github.com/kalayciburak/lx/internal/lookup"
@@ -27,9 +29,60 @@ const (
 	LevelFilterWarn
 	LevelFilterInfo
 	LevelFilterDebug
+	LevelFilterTrace
 )
 
-var LevelFilters = []LevelFilter{LevelFilterAll, LevelFilterError, LevelFilterWarn, LevelFilterInfo, LevelFilterDebug}
+var LevelFilters = []LevelFilter{LevelFilterAll, LevelFilterError, LevelFilterWarn, LevelFilterInfo, LevelFilterDebug, LevelFilterTrace}
+
+type NoteLevel int
+
+const (
+	NoteLevelNormal NoteLevel = iota
+	NoteLevelCritical
+	NoteLevelUnsure
+)
+
+func (nl NoteLevel) String() string {
+	switch nl {
+	case NoteLevelCritical:
+		return "CRIT"
+	case NoteLevelUnsure:
+		return "UNSURE"
+	default:
+		return ""
+	}
+}
+
+func (nl NoteLevel) Symbol() string {
+	switch nl {
+	case NoteLevelCritical:
+		return "!"
+	case NoteLevelUnsure:
+		return "?"
+	default:
+		return ""
+	}
+}
+
+type Note struct {
+	Text      string
+	Level     NoteLevel
+	CreatedAt time.Time
+}
+
+func ParseNoteLevel(text string) (NoteLevel, string) {
+	if len(text) == 0 {
+		return NoteLevelNormal, text
+	}
+	switch text[0] {
+	case '!':
+		return NoteLevelCritical, text[1:]
+	case '?':
+		return NoteLevelUnsure, text[1:]
+	default:
+		return NoteLevelNormal, text
+	}
+}
 
 func (lf LevelFilter) String() string {
 	switch lf {
@@ -41,6 +94,8 @@ func (lf LevelFilter) String() string {
 		return "INFO"
 	case LevelFilterDebug:
 		return "DEBUG"
+	case LevelFilterTrace:
+		return "TRACE"
 	default:
 		return "ALL"
 	}
@@ -60,16 +115,18 @@ type State struct {
 	InputMode input.Mode
 	FileName  string
 
-	Notes        map[int]string
-	CurrentNote  string
-	NoteLineIdx  int
-	ShowingNotes map[int]bool
+	Notes         map[int]Note
+	CurrentNote   string
+	NoteCursorPos int
+	NoteLineIdx   int
+	ShowingNotes  map[int]bool
 
 	LookupQuery   string
 	LookupResults []lookup.StatusInfo
 	LookupCursor  int
 
-	SignalResult *signal.SignalResult
+	DetailScroll  int
+	SignalResult  *signal.SignalResult
 
 	PrevMode Mode
 
@@ -90,7 +147,7 @@ func NewState(entries []logx.Entry, inputMode input.Mode, fileName string) *Stat
 		InputMode:    inputMode,
 		FileName:     fileName,
 		Mode:         ModeList,
-		Notes:        make(map[int]string),
+		Notes:        make(map[int]Note),
 		NoteLineIdx:  -1,
 		ShowingNotes: make(map[int]bool),
 	}
@@ -109,6 +166,7 @@ func (s *State) Refilter() {
 	if s.Cursor < 0 {
 		s.Cursor = 0
 	}
+	s.DetailScroll = 0
 }
 
 func (s *State) levelFilterToLogxLevel() logx.Level {
@@ -121,6 +179,8 @@ func (s *State) levelFilterToLogxLevel() logx.Level {
 		return logx.LevelInfo
 	case LevelFilterDebug:
 		return logx.LevelDebug
+	case LevelFilterTrace:
+		return logx.LevelTrace
 	default:
 		return logx.LevelUnknown
 	}
@@ -164,6 +224,7 @@ func (s *State) MoveCursor(delta int) {
 	if s.Cursor < 0 {
 		s.Cursor = 0
 	}
+	s.DetailScroll = 0
 }
 
 func (s *State) DeleteSelected() {
@@ -222,14 +283,31 @@ func (s *State) HasNote(idx int) bool {
 }
 
 func (s *State) GetNote(idx int) string {
-	return s.Notes[idx]
+	if note, ok := s.Notes[idx]; ok {
+		return note.Text
+	}
+	return ""
 }
 
-func (s *State) SetNote(idx int, note string) {
-	if note == "" {
+func (s *State) GetNoteObj(idx int) (Note, bool) {
+	note, ok := s.Notes[idx]
+	return note, ok
+}
+
+func (s *State) SetNote(idx int, noteText string) {
+	if noteText == "" {
 		delete(s.Notes, idx)
-	} else {
-		s.Notes[idx] = note
+		return
+	}
+	level, text := ParseNoteLevel(noteText)
+	if text == "" {
+		delete(s.Notes, idx)
+		return
+	}
+	s.Notes[idx] = Note{
+		Text:      text,
+		Level:     level,
+		CreatedAt: time.Now(),
 	}
 }
 
@@ -290,6 +368,16 @@ func (s *State) TotalNotes() int {
 	return len(s.Notes)
 }
 
+func (s *State) FilteredNotesCount() int {
+	count := 0
+	for _, idx := range s.Filtered {
+		if _, ok := s.Notes[idx]; ok {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *State) IsNoteShowing(idx int) bool {
 	return s.ShowingNotes[idx]
 }
@@ -337,7 +425,11 @@ func (s *State) AllNotesText() string {
 	var result string
 	for _, idx := range s.NotedLines() {
 		note := s.Notes[idx]
-		result += "Line " + itoa(idx+1) + ": " + note + "\n"
+		levelStr := ""
+		if note.Level != NoteLevelNormal {
+			levelStr = "[" + note.Level.String() + "] "
+		}
+		result += "Line " + itoa(idx+1) + ": " + levelStr + note.Text + "\n"
 	}
 	return result
 }

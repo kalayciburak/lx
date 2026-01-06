@@ -12,6 +12,7 @@ var (
 	ColorWarn    = lipgloss.Color("#E5C07B")
 	ColorInfo    = lipgloss.Color("#5B8FB9")
 	ColorDebug   = lipgloss.Color("#7B68A6")
+	ColorTrace   = lipgloss.Color("#5B9B8B")
 	ColorSuccess = lipgloss.Color("#6B9B6B")
 
 	ColorBg       = lipgloss.Color("#0C0C10")
@@ -77,7 +78,7 @@ var (
 				Foreground(ColorTextBright)
 
 	StyleTimestamp = lipgloss.NewStyle().
-			Foreground(ColorTextMuted)
+			Foreground(ColorAccent)
 
 	StyleMessage = lipgloss.NewStyle().
 			Foreground(ColorTextPrimary)
@@ -111,8 +112,8 @@ var (
 			Padding(0, 1)
 
 	StyleLevelTrace = lipgloss.NewStyle().
-			Foreground(ColorTextMuted).
-			Background(ColorBgAlt).
+			Foreground(ColorBg).
+			Background(ColorTrace).
 			Padding(0, 1)
 
 	StyleLevelUnknown = lipgloss.NewStyle().
