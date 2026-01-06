@@ -1,6 +1,6 @@
 module github.com/kalayciburak/lx
 
-go 1.25.5
+go 1.23
 
 require (
 	github.com/atotto/clipboard v0.1.4

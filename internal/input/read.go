@@ -45,3 +45,14 @@ func ReadClipboard() ([]string, error) {
 func WriteClipboard(content string) error {
 	return clipboard.WriteAll(content)
 }
+
+func StreamStdin(ch chan<- string) {
+	scanner := bufio.NewScanner(os.Stdin)
+	const maxBuf = 1024 * 1024
+	buf := make([]byte, maxBuf)
+	scanner.Buffer(buf, maxBuf)
+	for scanner.Scan() {
+		ch <- scanner.Text()
+	}
+	close(ch)
+}

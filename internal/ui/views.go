@@ -34,7 +34,10 @@ func RenderTitleBar(s *app.State, workspaceIdx, workspaceCount, width int) strin
 		parts = append(parts, StyleBarHighlight.Render(Truncate(s.FileName, 25)))
 	}
 
-	if s.IsLoading {
+	if s.IsLive {
+		liveText := "LIVE " + Itoa(len(s.Entries)) + " lines"
+		parts = append(parts, StyleBarAccent.Render("● ")+StyleBarHighlight.Render(liveText))
+	} else if s.IsLoading {
 		loadingText := "Loading... " + Itoa(s.LoadingProgress) + " lines"
 		parts = append(parts, StyleBarAccent.Render("⟳ ")+StyleBarHighlight.Render(loadingText))
 	} else {

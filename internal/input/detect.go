@@ -28,6 +28,7 @@ type Source struct {
 	Mode     Mode
 	FileName string
 	Content  []string
+	IsLive   bool
 }
 
 func Detect(args []string) (*Source, error) {
@@ -45,13 +46,9 @@ func Detect(args []string) (*Source, error) {
 	}
 
 	if !isTerminal(os.Stdin) {
-		lines, err := ReadStdin()
-		if err != nil {
-			return nil, err
-		}
 		return &Source{
-			Mode:    ModePipe,
-			Content: lines,
+			Mode:   ModePipe,
+			IsLive: true,
 		}, nil
 	}
 

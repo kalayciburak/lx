@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kalayciburak/lx/internal/app"
@@ -25,6 +26,49 @@ func main() {
 	if source != nil {
 		inputMode = source.Mode
 		fileName = source.FileName
+	}
+
+	if source != nil && source.IsLive {
+		state := app.NewLoadingState(inputMode, fileName)
+		state.IsLive = true
+		state.IsLoading = false
+		model := ui.NewModel(state)
+		p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInputTTY())
+
+		lineCh := make(chan string, 1000)
+		go input.StreamStdin(lineCh)
+
+		go func() {
+			var batch []string
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case line, ok := <-lineCh:
+					if !ok {
+						if len(batch) > 0 {
+							p.Send(ui.LiveBatchMsg{Entries: logx.ParseLines(batch)})
+						}
+						p.Send(ui.LiveStoppedMsg{})
+						return
+					}
+					batch = append(batch, line)
+					if len(batch) >= 100 {
+						p.Send(ui.LiveBatchMsg{Entries: logx.ParseLines(batch)})
+						batch = nil
+					}
+				case <-ticker.C:
+					if len(batch) > 0 {
+						p.Send(ui.LiveBatchMsg{Entries: logx.ParseLines(batch)})
+						batch = nil
+					}
+				}
+			}
+		}()
+
+		p.Run()
+		os.Exit(0)
 	}
 
 	if source != nil && len(source.Content) > asyncLoadingThreshold {

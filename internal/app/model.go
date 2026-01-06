@@ -144,6 +144,7 @@ type State struct {
 	StatusMsg string
 
 	IsLoading       bool
+	IsLive          bool
 	LoadingProgress int
 }
 

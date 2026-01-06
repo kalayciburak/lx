@@ -1,33 +1,62 @@
-# lx (Log X-Ray)
+# lx
 
-A fast, ephemeral log viewer with offline analytics. Paste a prod error, get clarity in 30 seconds.
+Terminal-based log viewer. Paste logs, filter, annotate, copy.
 
-![lx demo](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-
-## Features
-
-- **Zero Config** - No setup, no database, no state. Just logs.
-- **Smart Parsing** - JSON, plain text, stack traces auto-detected
-- **Powerful Filtering** - Inclusive and exclusive patterns with AND logic
-- **Level Filter** - Quick filtering by log level (ERROR/WARN/INFO/DEBUG)
-- **Signal Booster** - Offline analytics for error patterns
-- **Notes** - Annotate log lines during investigation
-- **HTTP Lookup** - Quick reference for HTTP status codes
-- **Vim-style Navigation** - j/k, g/G, familiar keybindings
-
-## Installation
-
-### From Source
+![lx demo](demo.gif)
 
 ```bash
-# Clone and build
-git clone https://github.com/kalayciburak/lx
-cd lx
-go build -o lx ./cmd/lx
+# From clipboard
+lx
 
-# Optional: Install globally
+# From file
+lx app.log
+
+# From pipe
+kubectl logs pod-name | lx
+
+# Live stream
+docker logs -f container | lx
+```
+
+## What It Does
+
+- Parses JSON and plain text logs
+- Filters by text pattern and log level
+- Lets you annotate lines with notes
+- Copies logs with annotations to clipboard
+- Runs offline analytics on error patterns
+
+## What It Doesn't Do
+
+- Persist anything to disk
+- Connect to external services
+- Handle files larger than available RAM
+- Replace grep for simple searches
+
+## Install
+
+### Download Binary
+
+Grab the latest release for your platform:
+
+```bash
+# Linux (amd64)
+curl -L https://github.com/kalayciburak/lx/releases/latest/download/lx-linux-amd64 -o lx
+chmod +x lx
 sudo mv lx /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -L https://github.com/kalayciburak/lx/releases/latest/download/lx-darwin-arm64 -o lx
+chmod +x lx
+sudo mv lx /usr/local/bin/
+
+# macOS (Intel)
+curl -L https://github.com/kalayciburak/lx/releases/latest/download/lx-darwin-amd64 -o lx
+chmod +x lx
+sudo mv lx /usr/local/bin/
+
+# Windows (PowerShell)
+Invoke-WebRequest -Uri https://github.com/kalayciburak/lx/releases/latest/download/lx-windows-amd64.exe -OutFile lx.exe
 ```
 
 ### Go Install
@@ -36,223 +65,172 @@ sudo mv lx /usr/local/bin/
 go install github.com/kalayciburak/lx/cmd/lx@latest
 ```
 
-### Requirements
-
-- Go 1.25+
-- Terminal with Unicode support
-
-## Usage
-
-### Read from File
+### Build from Source
 
 ```bash
-lx app.log
-lx /var/log/nginx/error.log
+git clone https://github.com/kalayciburak/lx
+cd lx
+go build -o lx ./cmd/lx
 ```
 
-### Pipe from Command
-
-```bash
-cat logs.txt | lx
-kubectl logs pod-name | lx
-docker logs container | lx
-tail -f app.log | lx
-```
-
-### Interactive Mode
-
-```bash
-lx
-# Then press 'p' to paste from clipboard
-```
+**Requires:** Go 1.23+, terminal with Unicode support
 
 ## Keybindings
 
 ### Navigation
 
-| Key       | Action               |
-| --------- | -------------------- |
-| `j` / `k` | Move down / up       |
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move down / up |
 | `g` / `G` | Jump to top / bottom |
-| `Enter`   | Toggle detail view   |
+| `Enter` | Toggle detail view |
+| `z` | Maximize detail view |
 
 ### Filter
 
-| Key   | Action                                         |
-| ----- | ---------------------------------------------- |
-| `/`   | Open filter modal                              |
-| `Tab` | Cycle level filter (ALL/ERROR/WARN/INFO/DEBUG) |
-| `ESC` | Apply filter / exit                            |
-
-### Signal Booster (Analytics)
-
-| Key | Action                                          |
-| --- | ----------------------------------------------- |
-| `1` | Error frequency - top errors by count           |
-| `2` | Lifetime - first/last seen for selected message |
-| `3` | Burst detector - detect error spikes            |
-| `4` | Diversity - error variety analysis              |
+| Key | Action |
+|-----|--------|
+| `/` | Open filter input |
+| `Tab` | Cycle level (ALL → ERROR → WARN → INFO → DEBUG → TRACE) |
+| `Ctrl+R` | Clear filter |
+| `Esc` | Close filter |
 
 ### Notes
 
-| Key       | Action                           |
-| --------- | -------------------------------- |
-| `N`       | Write/edit note for current line |
-| `n`       | Toggle note display              |
-| `m`       | Show/hide all notes              |
-| `]` / `[` | Jump to next/prev noted line     |
+| Key | Action |
+|-----|--------|
+| `N` | Add/edit note on current line |
+| `n` | Toggle note visibility |
+| `m` | Show/hide all notes |
+| `]` / `[` | Jump to next/prev noted line |
+| `D` | Delete note |
 
-### Copy & Edit
+### Selection & Copy
 
-| Key | Action                                  |
-| --- | --------------------------------------- |
-| `c` | Copy current line (with note if exists) |
-| `y` | Yank all visible logs + notes           |
-| `p` | Paste from clipboard                    |
-| `d` | Delete current line                     |
-| `x` | Clear all                               |
+| Key | Action |
+|-----|--------|
+| `s` | Toggle selection on current line |
+| `S` | Select all / clear selection |
+| `c` | Copy selected lines (or current if none selected) |
+| `y` | Copy all visible lines |
 
-### Tools
+### Edit
 
-| Key      | Action                  |
-| -------- | ----------------------- |
+| Key | Action |
+|-----|--------|
+| `d` | Delete selected lines (or current) |
+| `x` | Clear all lines |
+| `u` | Undo delete |
+| `U` | Redo delete |
+| `p` | Paste from clipboard |
+| `o` | Open file |
+
+### Signal Analysis
+
+| Key | Action |
+|-----|--------|
+| `1` | Error frequency (top errors by count) |
+| `2` | Lifetime (first/last occurrence of selected error) |
+| `3` | Burst detector (error spike detection) |
+| `4` | Diversity (error variety analysis) |
+
+### Workspace
+
+| Key | Action |
+|-----|--------|
+| `T` | New workspace |
+| `W` | Close workspace |
+| `Tab` | Next workspace (when multiple open) |
+| `Shift+Tab` | Previous workspace |
+
+### Other
+
+| Key | Action |
+|-----|--------|
 | `Ctrl+L` | HTTP status code lookup |
-| `?`      | Toggle help             |
-| `q`      | Quit                    |
+| `?` | Help |
+| `q` | Quit |
 
 ## Filter Syntax
 
-| Pattern         | Meaning                      |
-| --------------- | ---------------------------- |
-| `error`         | Lines containing "error"     |
-| `!debug`        | Lines NOT containing "debug" |
-| `error timeout` | Lines with both terms (AND)  |
-| `error !debug`  | "error" but NOT "debug"      |
-
-All filters are **case-insensitive**.
-
-## Signal Booster
-
-Offline analytics that run entirely in RAM - no network, no database.
-
-### 1. Error Frequency (`1`)
-
-Shows top 10 most frequent ERROR messages:
-
 ```
-TOP ERROR SIGNALS
-
-timeout contacting downstream    x12
-HTTP 503 Service Unavailable      x9
-connection pool exhausted         x4
+error           → lines containing "error"
+!debug          → lines NOT containing "debug"
+error timeout   → lines with both "error" AND "timeout"
+error !debug    → "error" but NOT "debug"
 ```
 
-### 2. Lifetime Analysis (`2`)
+- Case-insensitive
+- Multiple terms use AND logic
+- Prefix `!` for exclusion
+- Filter applies to visible lines; `y` copies only filtered results
 
-Shows when a specific error first/last appeared:
+## Notes
 
+Notes are temporary annotations attached to log lines.
+
+**Add a note:** Press `N`, type your note, press `Enter`
+
+**Note levels:** Start with `!` for critical, `?` for unsure
 ```
-SIGNAL LIFETIME
-
-Message: connection timeout
-First seen: 2024-01-15T10:30:45Z
-Last seen:  2024-01-15T10:45:22Z
-Occurrences: 15
-```
-
-### 3. Burst Detector (`3`)
-
-Detects unusual error spikes:
-
-```
-BURST ANALYSIS
-
-Message: database connection failed
-BURST DETECTED
-8 occurrences in 10s window
+!root cause         → marked as CRIT
+?needs verification → marked as UNSURE
+just a note         → normal
 ```
 
-### 4. Error Diversity (`4`)
-
-Analyzes error variety:
-
-```
-ERROR DIVERSITY
-
-Total ERROR lines:     45
-Unique ERROR messages: 3
-
-Signal quality: HIGH
-Repetitive errors - clear pattern
-```
-
-## Notes System
-
-Annotate log lines during investigation:
-
-1. Press `N` on any line to add a note
-2. Press `n` to toggle note visibility
-3. Press `m` to show/hide all notes
-4. Notes are included when copying with `y` or `c`
-
-Export format:
-
+**Copy behavior:** When copying with `c` or `y`, notes are included:
 ```
 === NOTE (lx) ===
-• [line 42] This is the root cause
+• [line 42] [CRIT] root cause
 
 === LOG ===
 line 42: {"level":"error","msg":"connection refused"}
 ```
 
-## Supported Log Formats
+**Persistence:** Notes exist only in current session. Closing lx discards them.
 
-### JSON Logs
+## Signal Analysis
 
+Offline analytics for error patterns. No network, no database.
+
+| Signal | What it shows |
+|--------|---------------|
+| `1` Error Frequency | Top 10 most common ERROR messages |
+| `2` Lifetime | First/last occurrence of selected message |
+| `3` Burst Detector | Detects error spikes in short time windows |
+| `4` Diversity | Ratio of unique errors to total errors |
+
+Results are heuristic-based. False positives possible with unusual log formats.
+
+## Limitations
+
+| Limit | Value | Behavior when exceeded |
+|-------|-------|------------------------|
+| Copy all (`y`) | 1,000 lines | Shows error message |
+| Select all (`S`) | 3,000 lines | Shows error message |
+| Text filter | 15,000 lines | Text filter disabled, level filter still works |
+
+**Large files:** All logs are loaded into RAM. For files larger than available memory, use `grep` or `head` to reduce input size first.
+
+**Live streaming:** Supported via pipe (`docker logs -f container | lx`). Exit with `Ctrl+C`.
+
+**Timestamps:** Signal analysis requires parseable timestamps. Logs without timestamps show limited analytics.
+
+## Supported Formats
+
+**JSON:**
 ```json
-{"msg":"connection failed","level":"error","service":"api"}
-{"message":"request completed","severity":"info","duration_ms":42}
+{"msg":"error","level":"error","time":"2024-01-15T10:30:45Z"}
+{"message":"ok","severity":"info"}
 ```
 
-### Plain Text
-
+**Plain text:**
 ```
-2024-01-15 10:30:45 ERROR Database connection timeout
-[WARN] Disk space low on /dev/sda1
+2024-01-15 10:30:45 ERROR Database timeout
+[WARN] Disk space low
 ```
 
-### Stack Traces
-
-Auto-detected patterns:
-
-- Java: `at com.example.Foo.bar(Foo.java:123)`
-- Go: `main.go:45`, `goroutine 1 [running]`
-- Python: `File "/app/main.py", line 42`
-
-## Philosophy
-
-**lx is not a log viewer. It's a thinking accelerator.**
-
-When debugging at 3 AM, you don't need:
-
-- A database to query later
-- Config files to manage
-- State to persist
-
-You need:
-
-1. Copy error from Slack
-2. Understand what happened
-3. Add notes during investigation
-4. Copy relevant logs with annotations
-5. Paste into incident report
-6. Move on
-
-**Input -> RAM -> Brain -> Clipboard -> Done.**
-
-No setup. No cleanup. No "let me save this for later."
-
-Parse the chaos. Find the signal. Copy. Exit. Sleep.
+**Stack traces:** Java, Go, Python patterns auto-detected.
 
 ## License
 

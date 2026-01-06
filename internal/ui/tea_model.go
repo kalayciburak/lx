@@ -28,6 +28,12 @@ type LoadingBatchMsg struct {
 
 type LoadingCompleteMsg struct{}
 
+type LiveBatchMsg struct {
+	Entries []logx.Entry
+}
+
+type LiveStoppedMsg struct{}
+
 func sanitizeForClipboard(s string) string {
 	return strings.ReplaceAll(s, "\x00", "")
 }
@@ -154,6 +160,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case LoadingCompleteMsg:
 		m.State.FinishLoading()
 		m.State.StatusMsg = "Loaded " + Itoa(len(m.State.Entries)) + " lines"
+		return m, nil
+	case LiveBatchMsg:
+		m.State.AppendEntries(msg.Entries)
+		return m, nil
+	case LiveStoppedMsg:
+		m.State.IsLive = false
+		m.State.StatusMsg = "Stream ended"
 		return m, nil
 	}
 	return m, nil
