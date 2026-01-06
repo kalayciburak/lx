@@ -1,6 +1,6 @@
-# lx
+# lx (Log X-Ray)
 
-Terminal-based log viewer. Paste logs, filter, annotate, copy.
+Terminal-based log analysis tool. Paste logs, filter, annotate, copy.
 
 ![lx demo](./demo.gif)
 
