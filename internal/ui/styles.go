@@ -9,15 +9,15 @@ var (
 	ColorAccent = lipgloss.Color("#FF6B00")
 
 	ColorError   = lipgloss.Color("#E54B4B")
-	ColorWarn    = lipgloss.Color("#D4915D")
+	ColorWarn    = lipgloss.Color("#E5C07B")
 	ColorInfo    = lipgloss.Color("#5B8FB9")
-	ColorDebug   = lipgloss.Color("#8B7CB3")
+	ColorDebug   = lipgloss.Color("#7B68A6")
 	ColorSuccess = lipgloss.Color("#6B9B6B")
 
 	ColorBg       = lipgloss.Color("#0C0C10")
 	ColorBgAlt    = lipgloss.Color("#121218")
 	ColorBgPanel  = lipgloss.Color("#2A2A38")
-	ColorBgSelect = lipgloss.Color("#1E1E28")
+	ColorBgSelect = lipgloss.Color("#4A2800")
 
 	ColorTextPrimary   = lipgloss.Color("#D0D0DC")
 	ColorTextSecondary = lipgloss.Color("#8888A0")
@@ -105,8 +105,9 @@ var (
 			Padding(0, 1)
 
 	StyleLevelDebug = lipgloss.NewStyle().
-			Foreground(ColorTextPrimary).
-			Background(ColorBgPanel).
+			Foreground(ColorBg).
+			Background(ColorDebug).
+			Bold(true).
 			Padding(0, 1)
 
 	StyleLevelTrace = lipgloss.NewStyle().

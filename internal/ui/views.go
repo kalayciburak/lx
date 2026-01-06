@@ -14,7 +14,7 @@ import (
 func RenderTitleBar(s *app.State, width int) string {
 	var parts []string
 
-	parts = append(parts, StyleBarAccent.Render("★")+StyleBarHighlight.Render("LX"))
+	parts = append(parts, StyleBarHighlight.Render("lx by kalayciburak"))
 
 	sep := StyleBarDim.Render(" │ ")
 
@@ -117,20 +117,28 @@ func RenderList(s *app.State, height, width int) string {
 func RenderListLine(entry *logx.Entry, lineNum, lineNumW, width int, selected, hasNote bool) string {
 	var parts []string
 
-	noteIndicator := "  "
+	bg := lipgloss.NewStyle()
+	if selected {
+		bg = bg.Background(ColorBgSelect)
+	}
+
+	noteIndicator := bg.Render("  ")
 	if hasNote {
-		noteIndicator = StyleNoteIndicator.Render("≡") + " "
+		noteIndicator = StyleNoteIndicator.Copy().Background(ColorBgSelect).Render("≡") + bg.Render(" ")
+		if !selected {
+			noteIndicator = StyleNoteIndicator.Render("≡") + " "
+		}
 	}
 
 	numStr := PadLeft(Itoa(lineNum), lineNumW-1)
 	if selected {
-		parts = append(parts, noteIndicator+StyleLineNumSelected.Render(numStr))
+		parts = append(parts, noteIndicator+StyleLineNumSelected.Copy().Background(ColorBgSelect).Render(numStr))
 	} else {
 		parts = append(parts, noteIndicator+StyleLineNum.Render(numStr))
 	}
 
 	if selected {
-		parts = append(parts, StyleCursorIndicator.Render("▶"))
+		parts = append(parts, StyleCursorIndicator.Copy().Background(ColorBgSelect).Render(">"))
 	} else {
 		parts = append(parts, " ")
 	}
@@ -139,7 +147,11 @@ func RenderListLine(entry *logx.Entry, lineNum, lineNumW, width int, selected, h
 	parts = append(parts, LevelStyle(entry.Level).Render(levelStr))
 
 	if entry.Timestamp != "" {
-		parts = append(parts, StyleTimestamp.Render(Truncate(entry.Timestamp, 19)))
+		if selected {
+			parts = append(parts, StyleTimestamp.Copy().Background(ColorBgSelect).Render(Truncate(entry.Timestamp, 19)))
+		} else {
+			parts = append(parts, StyleTimestamp.Render(Truncate(entry.Timestamp, 19)))
+		}
 	}
 
 	usedW := 0
@@ -152,18 +164,21 @@ func RenderListLine(entry *logx.Entry, lineNum, lineNumW, width int, selected, h
 	}
 
 	msg := Truncate(entry.Message, msgW)
-	styledMsg := RenderLxFormat(msg, entry.IsStack)
+	if selected {
+		styledMsg := StyleMessage.Copy().Background(ColorBgSelect).Render(msg)
+		parts = append(parts, styledMsg)
+	} else {
+		styledMsg := RenderLxFormat(msg, entry.IsStack)
+		parts = append(parts, styledMsg)
+	}
 
-	parts = append(parts, styledMsg)
-
-	line := strings.Join(parts, " ")
+	line := strings.Join(parts, bg.Render(" "))
 
 	if selected {
 		lineW := lipgloss.Width(line)
 		if lineW < width {
-			line += strings.Repeat(" ", width-lineW)
+			line += bg.Render(strings.Repeat(" ", width-lineW))
 		}
-		line = StyleSelectedLine.Render(line)
 	}
 
 	return line
@@ -922,7 +937,7 @@ func RenderHelp(height, width int) string {
 		{"m", "show all", "^L", "HTTP lookup"},
 		{"]/[", "jump notes", "?", "help"},
 		{"", "", "", ""},
-		{"Enter", "detail", "q", "quit"},
+		{"Enter", " detail", "q", "quit"},
 	}
 
 	modalW := 46
@@ -961,7 +976,7 @@ func RenderHelp(height, width int) string {
 
 	content.WriteString(StyleFrameBorder.Render("│") + strings.Repeat(" ", modalW-2) + StyleFrameBorder.Render("│") + "\n")
 
-	footer := StyleBarAccent.Render("★") + StyleHelpDesc.Render(" lx")
+	footer := StyleHelpDesc.Render("lx by kalayciburak")
 	footerW := lipgloss.Width(footer)
 	footerPad := (innerW - footerW) / 2
 	content.WriteString(StyleFrameBorder.Render("│") + " " + strings.Repeat(" ", footerPad) + footer + strings.Repeat(" ", innerW-footerPad-footerW) + " " + StyleFrameBorder.Render("│") + "\n")
