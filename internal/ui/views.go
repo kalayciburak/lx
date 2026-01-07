@@ -591,7 +591,7 @@ func CountDetailLines(entry *logx.Entry, width int) int {
 	return lines
 }
 
-func RenderDetail(entry *logx.Entry, height, width, offset int) string {
+func RenderDetail(s *app.State, entry *logx.Entry, height, width int, maximized bool) string {
 	var lines []string
 
 	if entry == nil {
@@ -601,12 +601,21 @@ func RenderDetail(entry *logx.Entry, height, width, offset int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	headerText := "─── DETAIL ───"
+	var headerText string
+	if maximized {
+		headerText = "═══ DETAIL (MAXIMIZED · g/G jump · j/k scroll · z exit) ═══"
+	} else {
+		headerText = "─── DETAIL ───"
+	}
 	headerPad := (width - len(headerText)) / 2
 	if headerPad < 0 {
 		headerPad = 0
 	}
-	lines = append(lines, strings.Repeat(" ", headerPad)+StyleDetailHeader.Render(headerText))
+	if maximized {
+		lines = append(lines, strings.Repeat(" ", headerPad)+StyleBarAccent.Bold(true).Render(headerText))
+	} else {
+		lines = append(lines, strings.Repeat(" ", headerPad)+StyleDetailHeader.Render(headerText))
+	}
 
 	contentH := height - 1
 	var contentLines []string
@@ -616,17 +625,67 @@ func RenderDetail(entry *logx.Entry, height, width, offset int) string {
 		contentLines = renderTextDetailLines(entry, width-2)
 	}
 
+	if maximized {
+		idx := s.SelectedIndex()
+		if note, ok := s.GetNoteObj(idx); ok {
+			var noteStyle lipgloss.Style
+			var notePrefix string
+			switch note.Level {
+			case app.NoteLevelCritical:
+				noteStyle = StyleLevelError
+				notePrefix = "!"
+			case app.NoteLevelUnsure:
+				noteStyle = StyleLevelWarn
+				notePrefix = "?"
+			default:
+				noteStyle = StyleNotesHeader
+				notePrefix = "≡"
+			}
+			noteLine := " " + noteStyle.Render(" "+notePrefix+" NOTE ") + " " + StyleDetailValue.Render(note.Text)
+			contentLines = append([]string{noteLine, " " + StyleDetailDim.Render("───")}, contentLines...)
+		}
+	}
+
 	totalLines := len(contentLines)
-	if offset > totalLines-contentH {
-		offset = totalLines - contentH
+	hasMore := totalLines > contentH
+
+	maxOffset := totalLines - contentH
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+
+	offset := s.DetailScroll
+	if offset > maxOffset {
+		offset = maxOffset
+		s.DetailScroll = offset
 	}
 	if offset < 0 {
 		offset = 0
+		s.DetailScroll = 0
 	}
 
 	visibleLines := contentLines[offset:]
 	if len(visibleLines) > contentH {
 		visibleLines = visibleLines[:contentH]
+	}
+
+	if hasMore && !maximized {
+		if len(visibleLines) >= 2 {
+			visibleLines = visibleLines[:len(visibleLines)-2]
+		} else if len(visibleLines) > 0 {
+			visibleLines = visibleLines[:0]
+		}
+		remaining := totalLines - contentH + 2
+		moreLine := "── press z for more (" + Itoa(remaining) + " lines) ──"
+		morePad := (width - len(moreLine)) / 2
+		if morePad < 0 {
+			morePad = 0
+		}
+		zStyle := lipgloss.NewStyle().Foreground(ColorInfo).Bold(true)
+		numStyle := lipgloss.NewStyle().Foreground(ColorWarn).Bold(true)
+		styledMore := StyleDetailHeader.Render("── press ") + zStyle.Render("z") + StyleDetailHeader.Render(" for more (") + numStyle.Render(Itoa(remaining)) + StyleDetailHeader.Render(" lines) ──")
+		visibleLines = append(visibleLines, "")
+		visibleLines = append(visibleLines, strings.Repeat(" ", morePad)+styledMore)
 	}
 
 	lines = append(lines, visibleLines...)
@@ -1401,113 +1460,204 @@ func RenderOpenFileModal(path string, cursorPos int, suggestions []string, suggI
 }
 
 func RenderHelp(height, width int) string {
-	modalW := 60
-	innerW := modalW - 4
+	boxW := 28
+	keyW := 8
+	descW := 16
+
+	box := func(title string, rows [][]string, rowCount int) string {
+		var b strings.Builder
+		titleStyled := StyleBarAccent.Render(" " + title + " ")
+		titleW := lipgloss.Width(titleStyled)
+		rightDash := boxW - 3 - titleW
+		if rightDash < 0 {
+			rightDash = 0
+		}
+		b.WriteString(StyleFrameBorder.Render("╭─") + titleStyled + StyleFrameBorder.Render(strings.Repeat("─", rightDash)+"╮") + "\n")
+
+		for i := 0; i < rowCount; i++ {
+			if i < len(rows) {
+				key := PadRight(rows[i][0], keyW)
+				desc := PadRight(rows[i][1], descW)
+				b.WriteString(StyleFrameBorder.Render("│") + " " + StyleHelpKey.Render(key) + StyleHelpDesc.Render(desc) + " " + StyleFrameBorder.Render("│") + "\n")
+			} else {
+				b.WriteString(StyleFrameBorder.Render("│") + strings.Repeat(" ", boxW-2) + StyleFrameBorder.Render("│") + "\n")
+			}
+		}
+		b.WriteString(StyleFrameBorder.Render("╰" + strings.Repeat("─", boxW-2) + "╯"))
+		return b.String()
+	}
+
+	row1Height := 9
+	row2Height := 6
+
+	nav := box("NAVIGATION", [][]string{
+		{"j/↓", "down"},
+		{"k/↑", "up"},
+		{"g/G", "top/bottom"},
+		{"Enter", "detail"},
+		{"z", "maximize"},
+		{"PgUp/Dn", "scroll detail"},
+	}, row1Height)
+
+	filter := box("FILTER & NOTES", [][]string{
+		{"/", "filter"},
+		{"Tab", "cycle level"},
+		{"^R", "clear filter"},
+		{"N", "write note"},
+		{"n", "toggle note"},
+		{"m", "show/hide all"},
+		{"]/[", "next/prev note"},
+		{"D", "delete note"},
+	}, row1Height)
+
+	selection := box("SELECTION", [][]string{
+		{"s", "toggle select"},
+		{"S", "select all"},
+		{"c", "copy selected"},
+		{"d", "delete selected"},
+		{"y", "copy all"},
+		{"x", "clear all"},
+		{"u/U", "undo/redo"},
+		{"p/^V", "paste"},
+	}, row1Height)
+
+	signal := box("SIGNAL", [][]string{
+		{"1", "frequency"},
+		{"2", "lifetime"},
+		{"3", "burst"},
+		{"4", "diversity"},
+		{"^L", "HTTP lookup"},
+	}, row2Height)
+
+	workspace := box("WORKSPACE", [][]string{
+		{"T", "new workspace"},
+		{"W", "close workspace"},
+		{"Tab", "next workspace"},
+		{"S-Tab", "prev workspace"},
+	}, row2Height)
+
+	other := box("OTHER", [][]string{
+		{"o", "open file"},
+		{"?", "this help"},
+		{"q", "quit"},
+	}, row2Height)
+
+	navLines := strings.Split(nav, "\n")
+	filterLines := strings.Split(filter, "\n")
+	selectionLines := strings.Split(selection, "\n")
+	signalLines := strings.Split(signal, "\n")
+	workspaceLines := strings.Split(workspace, "\n")
+	otherLines := strings.Split(other, "\n")
+
+	var result []string
+
+	headerText := "KEYBOARD SHORTCUTS"
+	totalW := boxW*3 + 4
+	headerPad := (totalW - len(headerText)) / 2
+	result = append(result, strings.Repeat(" ", headerPad)+StyleDetailHeader.Render(headerText))
+	result = append(result, "")
+
+	for i := 0; i < len(navLines); i++ {
+		result = append(result, navLines[i]+"  "+filterLines[i]+"  "+selectionLines[i])
+	}
+	result = append(result, "")
+
+	for i := 0; i < len(signalLines); i++ {
+		result = append(result, signalLines[i]+"  "+workspaceLines[i]+"  "+otherLines[i])
+	}
+
+	result = append(result, "")
+	footer := StyleHelpDesc.Render("lx - Log X-Ray by kalayciburak")
+	footerW := lipgloss.Width(footer)
+	footerPad := (totalW - footerW) / 2
+	result = append(result, strings.Repeat(" ", footerPad)+footer)
+
+	modalH := len(result)
+	padTop := (height - modalH) / 2
+	if padTop < 0 {
+		padTop = 0
+	}
+	padLeft := (width - totalW) / 2
+	if padLeft < 0 {
+		padLeft = 0
+	}
+
+	var final []string
+	for i := 0; i < padTop; i++ {
+		final = append(final, "")
+	}
+	for _, line := range result {
+		final = append(final, strings.Repeat(" ", padLeft)+line)
+	}
+	for len(final) < height {
+		final = append(final, "")
+	}
+
+	return strings.Join(final, "\n")
+}
+
+func RenderQuitConfirm(workspaceCount, height, width int) string {
+	modalW := 44
+	if modalW > width-4 {
+		modalW = width - 4
+	}
+
+	borderStyle := lipgloss.NewStyle().Foreground(ColorWarn)
 
 	var content strings.Builder
 
-	headerText := " KEYBOARD SHORTCUTS "
-	headerPadTotal := modalW - 2 - len(headerText)
+	headerText := " ⚠ QUIT CONFIRMATION "
+	headerStyled := StyleLevelWarn.Bold(true).Render(headerText)
+	headerW := lipgloss.Width(headerStyled)
+	headerPadTotal := modalW - 2 - headerW
 	leftPad := headerPadTotal / 2
 	rightPad := headerPadTotal - leftPad
-	content.WriteString(StyleFrameBorder.Render("╭"+strings.Repeat("─", leftPad)) + StyleDetailHeader.Render(headerText) + StyleFrameBorder.Render(strings.Repeat("─", rightPad)+"╮") + "\n")
-
-	emptyLine := func() {
-		content.WriteString(StyleFrameBorder.Render("│") + strings.Repeat(" ", modalW-2) + StyleFrameBorder.Render("│") + "\n")
+	if leftPad < 0 {
+		leftPad = 0
 	}
-	sectionHeader := func(title string) {
-		styled := StyleBarAccent.Render("── " + title + " ")
-		styledW := lipgloss.Width(styled)
-		pad := innerW - styledW
-		if pad < 0 {
-			pad = 0
-		}
-		content.WriteString(StyleFrameBorder.Render("│") + " " + styled + StyleBarDim.Render(strings.Repeat("─", pad)) + " " + StyleFrameBorder.Render("│") + "\n")
+	if rightPad < 0 {
+		rightPad = 0
 	}
-	row := func(key1, desc1, key2, desc2 string) {
-		padKeyRight := func(s string, w int) string {
-			visW := lipgloss.Width(s)
-			if visW >= w {
-				return s
-			}
-			return s + strings.Repeat(" ", w-visW)
-		}
-		col1 := StyleHelpKey.Render(padKeyRight(key1, 8)) + StyleHelpDesc.Render(PadRight(desc1, 18))
-		col2 := ""
-		if key2 != "" {
-			col2 = StyleHelpKey.Render(padKeyRight(key2, 8)) + StyleHelpDesc.Render(desc2)
-		}
-		line := " " + col1 + col2
-		lineW := lipgloss.Width(line)
-		pad := innerW - lineW
-		if pad < 0 {
-			pad = 0
-		}
-		content.WriteString(StyleFrameBorder.Render("│") + " " + line + strings.Repeat(" ", pad) + " " + StyleFrameBorder.Render("│") + "\n")
+	content.WriteString(borderStyle.Render("╔"+strings.Repeat("═", leftPad)) + headerStyled + borderStyle.Render(strings.Repeat("═", rightPad)+"╗") + "\n")
+
+	emptyLine := borderStyle.Render("║") + strings.Repeat(" ", modalW-2) + borderStyle.Render("║") + "\n"
+	content.WriteString(emptyLine)
+
+	textBright := lipgloss.NewStyle().Foreground(ColorTextBright)
+	countStyled := StyleBarAccent.Bold(true).Render(Itoa(workspaceCount))
+	msgPre := "You have "
+	msgPost := " open workspaces."
+	msgLine := textBright.Render(msgPre) + countStyled + textBright.Render(msgPost)
+	msgLineW := lipgloss.Width(msgLine)
+	msgPad := (modalW - 2 - msgLineW) / 2
+	if msgPad < 0 {
+		msgPad = 0
 	}
+	content.WriteString(borderStyle.Render("║") + strings.Repeat(" ", msgPad) + msgLine + strings.Repeat(" ", modalW-2-msgPad-msgLineW) + borderStyle.Render("║") + "\n")
 
-	emptyLine()
-
-	sectionHeader("NAVIGATION")
-	row("j / ↓", "move down", "k / ↑", "move up")
-	row("g", "go to top", "G", "go to bottom")
-	row("Enter", "toggle detail", "z", "maximize detail")
-
-	emptyLine()
-
-	sectionHeader("FILTER")
-	row("/", "open filter", "Tab", "cycle level")
-	row("^R", "clear filter", "", "")
-
-	emptyLine()
-
-	sectionHeader("NOTES")
-	row("N", "write/edit note", "n", "toggle note")
-	row("m", "show/hide all", "] / [", "next/prev note")
-	row("D", "delete note", "", "")
-
-	emptyLine()
-
-	sectionHeader("SELECTION")
-	row("s", "toggle select", "S", "select all")
-	row("c", "copy selected", "d", "delete selected")
-
-	emptyLine()
-
-	sectionHeader("SIGNAL ANALYSIS")
-	row("1", "error frequency", "2", "first/last seen")
-	row("3", "burst detector", "4", "error diversity")
-
-	emptyLine()
-
-	sectionHeader("ACTIONS")
-	row("y", "copy all", "x", "clear all")
-	row("u", "undo delete", "U", "redo delete")
-	row("p / ^V", "paste logs", "o", "open file")
-	row("^L", "HTTP lookup", "", "")
-
-	emptyLine()
-
-	sectionHeader("WORKSPACE")
-	row("T", "new workspace", "W", "close workspace")
-	row("Tab", "next workspace", "S-Tab", "prev workspace")
-
-	emptyLine()
-
-	sectionHeader("OTHER")
-	row("?", "this help", "q", "quit")
-
-	emptyLine()
-
-	footer := StyleHelpDesc.Render("lx - Log X-Ray by kalayciburak")
-	footerW := lipgloss.Width(footer)
-	footerPad := (innerW - footerW) / 2
-	if footerPad < 0 {
-		footerPad = 0
+	msg2 := "Are you sure you want to quit?"
+	msg2Styled := textBright.Bold(true).Render(msg2)
+	msg2W := lipgloss.Width(msg2Styled)
+	msg2Pad := (modalW - 2 - msg2W) / 2
+	if msg2Pad < 0 {
+		msg2Pad = 0
 	}
-	content.WriteString(StyleFrameBorder.Render("│") + " " + strings.Repeat(" ", footerPad) + footer + strings.Repeat(" ", innerW-footerPad-footerW) + " " + StyleFrameBorder.Render("│") + "\n")
+	content.WriteString(borderStyle.Render("║") + strings.Repeat(" ", msg2Pad) + msg2Styled + strings.Repeat(" ", modalW-2-msg2Pad-msg2W) + borderStyle.Render("║") + "\n")
 
-	content.WriteString(StyleFrameBorder.Render("╰" + strings.Repeat("─", modalW-2) + "╯"))
+	content.WriteString(emptyLine)
+	content.WriteString(borderStyle.Render("╠" + strings.Repeat("═", modalW-2) + "╣") + "\n")
+
+	yStyle := lipgloss.NewStyle().Background(ColorError).Foreground(ColorBg).Bold(true)
+	nStyle := lipgloss.NewStyle().Background(ColorSuccess).Foreground(ColorBg).Bold(true)
+	hints := yStyle.Render(" y ") + textBright.Render(" quit  ") +
+		nStyle.Render(" n/ESC ") + textBright.Render(" cancel")
+	hintsW := lipgloss.Width(hints)
+	hintsPad := (modalW - 2 - hintsW) / 2
+	if hintsPad < 0 {
+		hintsPad = 0
+	}
+	content.WriteString(borderStyle.Render("║") + strings.Repeat(" ", hintsPad) + hints + strings.Repeat(" ", modalW-2-hintsPad-hintsW) + borderStyle.Render("║") + "\n")
+	content.WriteString(borderStyle.Render("╚" + strings.Repeat("═", modalW-2) + "╝"))
 
 	modalLines := strings.Split(content.String(), "\n")
 	modalH := len(modalLines)
@@ -1520,19 +1670,15 @@ func RenderHelp(height, width int) string {
 		padLeft = 0
 	}
 
-	var result []string
-
+	var result strings.Builder
 	for i := 0; i < padTop; i++ {
-		result = append(result, "")
+		result.WriteString(strings.Repeat(" ", width) + "\n")
 	}
 	for _, line := range modalLines {
-		result = append(result, strings.Repeat(" ", padLeft)+line)
-	}
-	for len(result) < height {
-		result = append(result, "")
+		result.WriteString(strings.Repeat(" ", padLeft) + line + "\n")
 	}
 
-	return strings.Join(result, "\n")
+	return result.String()
 }
 
 func RenderFooter(mode int, statusMsg string, selectionCount, width int) string {

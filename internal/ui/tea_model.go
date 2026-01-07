@@ -175,11 +175,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
-		if m.State.Mode == app.ModeList || m.State.Mode == app.ModeDetail {
+		if m.State.Mode == app.ModeDetail && m.State.DetailMaximized {
+			m.State.DetailScroll -= 3
+			if m.State.DetailScroll < 0 {
+				m.State.DetailScroll = 0
+			}
+		} else if m.State.Mode == app.ModeList || m.State.Mode == app.ModeDetail {
 			m.State.MoveCursor(-3)
 		}
 	case tea.MouseButtonWheelDown:
-		if m.State.Mode == app.ModeList || m.State.Mode == app.ModeDetail {
+		if m.State.Mode == app.ModeDetail && m.State.DetailMaximized {
+			m.State.DetailScroll += 3
+		} else if m.State.Mode == app.ModeList || m.State.Mode == app.ModeDetail {
 			m.State.MoveCursor(3)
 		}
 	}
@@ -202,6 +209,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSignalMode(msg)
 	case app.ModeOpenFile:
 		return m.handleOpenFileMode(msg)
+	case app.ModeQuitConfirm:
+		return m.handleQuitConfirmMode(msg)
 	default:
 		return m.handleListMode(msg)
 	}
@@ -210,6 +219,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case IsKey(msg, KeyQ):
+		if len(m.Workspaces) > 1 {
+			m.State.Mode = app.ModeQuitConfirm
+			return m, nil
+		}
 		return m, tea.Quit
 	case IsKey(msg, KeyCtrlC):
 		return m, tea.Quit
@@ -226,6 +239,12 @@ func (m Model) handleListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case IsKey(msg, KeyEnter, KeySpace):
 		if len(m.State.Filtered) > 0 {
 			m.State.Mode = app.ModeDetail
+		}
+	case IsKey(msg, KeyZ):
+		if len(m.State.Filtered) > 0 {
+			m.State.Mode = app.ModeDetail
+			m.State.DetailMaximized = true
+			m.State.DetailScroll = 0
 		}
 	case IsKey(msg, KeySlash):
 		m.State.Mode = app.ModeFilter
@@ -519,15 +538,26 @@ func (m Model) handleDetailMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.State.DetailMaximized = !m.State.DetailMaximized
 		m.State.DetailScroll = 0
 	case IsKey(msg, KeyJ, KeyDown):
-		m.State.MoveCursor(1)
-		m.State.DetailScroll = 0
+		if m.State.DetailMaximized {
+			m.State.DetailScroll++
+		} else {
+			m.State.MoveCursor(1)
+			m.State.DetailScroll = 0
+		}
 	case IsKey(msg, KeyK, KeyUp):
-		m.State.MoveCursor(-1)
-		m.State.DetailScroll = 0
+		if m.State.DetailMaximized {
+			m.State.DetailScroll--
+			if m.State.DetailScroll < 0 {
+				m.State.DetailScroll = 0
+			}
+		} else {
+			m.State.MoveCursor(-1)
+			m.State.DetailScroll = 0
+		}
 	case IsKey(msg, KeyPgDn):
-		m.State.DetailScroll += 5
+		m.State.DetailScroll += 10
 	case IsKey(msg, KeyPgUp):
-		m.State.DetailScroll -= 5
+		m.State.DetailScroll -= 10
 		if m.State.DetailScroll < 0 {
 			m.State.DetailScroll = 0
 		}
@@ -614,9 +644,15 @@ func (m Model) handleDetailMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.State.StatusMsg = "No notes to show"
 		}
 	case IsKey(msg, KeyG):
-		m.State.Cursor = 0
+		if m.State.DetailMaximized {
+			m.State.DetailScroll = 0
+		} else {
+			m.State.Cursor = 0
+		}
 	case IsKey(msg, KeyShiftG):
-		if len(m.State.Filtered) > 0 {
+		if m.State.DetailMaximized {
+			m.State.DetailScroll = 10000
+		} else if len(m.State.Filtered) > 0 {
 			m.State.Cursor = len(m.State.Filtered) - 1
 		}
 	case IsKey(msg, KeyY):
@@ -1080,6 +1116,18 @@ func (m Model) handleOpenFileMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleQuitConfirmMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case IsKey(msg, KeyY):
+		return m, tea.Quit
+	case IsKey(msg, KeyN, KeyEsc):
+		m.State.Mode = app.ModeList
+	case IsKey(msg, KeyCtrlC):
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
 func (m *Model) updateSignalForCurrentEntry() {
 	if m.State.SignalResult == nil {
 		return
@@ -1124,6 +1172,8 @@ func (m Model) View() string {
 		content = m.renderWithDetail(w, h)
 	case app.ModeOpenFile:
 		content = m.renderWithOpenFile(w, h)
+	case app.ModeQuitConfirm:
+		content = m.renderWithQuitConfirm(w, h)
 	default:
 		content = m.renderNormal(w, h)
 	}
@@ -1156,7 +1206,7 @@ func (m Model) renderWithDetail(w, h int) string {
 		if detailH < 6 {
 			detailH = 6
 		}
-		detail := RenderDetail(entry, detailH, w, m.State.DetailScroll)
+		detail := RenderDetail(m.State, entry, detailH, w, true)
 		return titleBar + "\n" + detail + "\n" + footer
 	}
 
@@ -1179,7 +1229,7 @@ func (m Model) renderWithDetail(w, h int) string {
 	}
 	list := RenderList(m.State, listH, w)
 	divider := Divider(w)
-	detail := RenderDetail(entry, detailH, w, m.State.DetailScroll)
+	detail := RenderDetail(m.State, entry, detailH, w, false)
 	return titleBar + "\n" + list + "\n" + divider + "\n" + detail + "\n" + footer
 }
 
@@ -1234,6 +1284,14 @@ func (m Model) renderWithOpenFile(w, h int) string {
 	bg := m.renderNormal(w, h)
 	bgLines := splitLines(bg)
 	modal := RenderOpenFileModal(m.State.OpenFilePath, m.State.OpenFileCursor, m.State.OpenFileSuggestions, m.State.OpenFileSuggIdx, h-2, w)
+	modalLines := splitLines(modal)
+	return overlayModal(bgLines, modalLines, w, h-2)
+}
+
+func (m Model) renderWithQuitConfirm(w, h int) string {
+	bg := m.renderNormal(w, h)
+	bgLines := splitLines(bg)
+	modal := RenderQuitConfirm(len(m.Workspaces), h-2, w)
 	modalLines := splitLines(modal)
 	return overlayModal(bgLines, modalLines, w, h-2)
 }

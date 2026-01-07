@@ -20,6 +20,7 @@ const (
 	ModeLookup
 	ModeSignal
 	ModeOpenFile
+	ModeQuitConfirm
 )
 
 type LevelFilter int

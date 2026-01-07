@@ -96,33 +96,36 @@ func Truncate(s string, maxLen int) string {
 }
 
 func PadLeft(s string, width int) string {
-	for len(s) < width {
-		s = " " + s
+	w := lipgloss.Width(s)
+	if w < width {
+		s = strings.Repeat(" ", width-w) + s
 	}
 	return s
 }
 
 func PadRight(s string, width int) string {
-	for len(s) < width {
-		s = s + " "
+	w := lipgloss.Width(s)
+	if w < width {
+		s = s + strings.Repeat(" ", width-w)
 	}
 	return s
 }
 
 func PadCenter(s string, width int) string {
-	if len(s) >= width {
-		return s[:width]
+	w := lipgloss.Width(s)
+	if w >= width {
+		return TruncateVisual(s, width)
 	}
-	pad := width - len(s)
+	pad := width - w
 	left := pad / 2
 	right := pad - left
 	return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
 }
 
 func CenterText(text string, width int, style lipgloss.Style) string {
-	textW := len(text)
+	textW := lipgloss.Width(text)
 	if textW >= width {
-		return style.Render(text[:width])
+		return style.Render(TruncateVisual(text, width))
 	}
 	pad := (width - textW) / 2
 	return strings.Repeat(" ", pad) + style.Render(text) + strings.Repeat(" ", width-textW-pad)
