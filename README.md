@@ -2,7 +2,7 @@
 
 Terminal-based log analysis tool. Paste logs, filter, annotate, copy.
 
-![lx demo](/assets/demo.gif)
+[![asciicast](https://asciinema.org/a/10ZNJ0yMIBvVgAzg.svg)](https://asciinema.org/a/10ZNJ0yMIBvVgAzg)
 
 ```bash
 # From clipboard
